@@ -1,3 +1,4 @@
+import { MobilePresentationProvider } from "./components/common/MobilePresentation";
 import { useCodexHandoffPresence } from "./app/useCodexHandoffPresence";
 import { JumpAuthenticationDialog } from "./components/connections/JumpAuthenticationDialog";
 import type { ConnectionAttemptProfile } from "./app/jumpRoutes";
@@ -237,11 +238,10 @@ function LazyOverlayFallback() {
   );
 }
 
-function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
+function Workspace({ preferences, update, activeTheme, runtime }: PreferencesValue & { runtime: ReturnType<typeof useRuntimeSummary> }) {
   const { t } = useI18n();
   const textEditor = useRemoteTextEditor();
   const workspace = useWorkspace();
-  const runtime = useRuntimeSummary();
   const platform = runtime.summary?.platform;
   const onMobile = isMobilePlatform(platform);
   useMobileViewport(onMobile);
@@ -1648,12 +1648,15 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
  */
 export default function App() {
   const preferences = usePreferences();
+  const runtime = useRuntimeSummary();
 
   return (
     <I18nProvider locale={preferences.preferences.locale}>
+      <MobilePresentationProvider platform={runtime.summary?.platform}>
       <RemoteTextEditorProvider>
-        <Workspace {...preferences} />
+        <Workspace {...preferences} runtime={runtime} />
       </RemoteTextEditorProvider>
+      </MobilePresentationProvider>
     </I18nProvider>
   );
 }

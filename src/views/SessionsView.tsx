@@ -1,4 +1,5 @@
 import { preserveTerminalButtonFocus } from "../components/terminal/terminalPointerFocus";
+import { DesktopDescription } from "../components/common/MobilePresentation";
 import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
 import { useProjectDirectoryIdentity } from "../app/useProjectDirectoryIdentity";
 import { projectDirectoryKey, localProjectId as directoryProjectId, disambiguateProjectLabels, type ProjectDirectoryKey } from "../app/projectDirectory";
@@ -1761,7 +1762,7 @@ export function SessionsView({
         />
         <span>
           {assistant}
-          <small className="field__hint">{t("terminal.projects.syncNativeHint")}</small>
+          <DesktopDescription><small className="field__hint">{t("terminal.projects.syncNativeHint")}</small></DesktopDescription>
         </span>
       </label>
     );

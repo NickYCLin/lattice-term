@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { useRef, useState } from "react";
 import type { ConnectionProfile } from "../../domain/connection";
 import type { JumpRequest } from "../../app/jumpRoutes";
@@ -31,7 +32,7 @@ export function JumpAuthenticationDialog({ gateway, onContinue, onCancel }: {
         onContinue({ profileId: gateway.id, auth: method === "privateKey" ? { kind: "privateKey", path, passphrase: passphrase || undefined } : { kind: "password", password: savedPassword ? "" : password }, useSavedPassword: method === "password" && savedPassword, rememberPassword: method === "password" && !savedPassword && remember });
       }}>
       <h2 id="jump-auth-title">{t("jump.authenticate", { name: gateway.name })}</h2>
-      <p>{t("jump.authHint")}</p>
+      <DesktopDescription><p>{t("jump.authHint")}</p></DesktopDescription>
       <label className="field"><span>{t("jump.authMethod")}</span><select className="select" value={method} onChange={event => setMethod(event.target.value as typeof method)}>
         <option value="password">{t("jump.password")}</option><option value="privateKey">{t("jump.privateKey")}</option>
       </select></label>

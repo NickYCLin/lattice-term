@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 /**
  * The encrypted vault's control panel: create, unlock, lock, change the
  * master password, and choose which store new secrets go to.
@@ -73,9 +74,9 @@ export function EncryptedVaultPanel({ vault }: { vault: VaultApi }) {
 
   return (
     <div className="stack" style={{ gap: "var(--space-5)", maxWidth: 560 }}>
-      <Callout tone="security" title={t("vault.encrypted.title")}>
+      <DesktopDescription><Callout tone="security" title={t("vault.encrypted.title")}>
         {t("vault.encrypted.body")}
-      </Callout>
+      </Callout></DesktopDescription>
 
       {vault.problem && (
         <Callout tone="warn" title={t("vault.encrypted.failedTitle")}>
@@ -123,7 +124,7 @@ export function EncryptedVaultPanel({ vault }: { vault: VaultApi }) {
               disabled={vault.busy}
               onChange={(event) => setPassword(event.currentTarget.value)}
             />
-            <p className="field__optional">{t("vault.encrypted.masterHint")}</p>
+            <DesktopDescription><p className="field__optional">{t("vault.encrypted.masterHint")}</p></DesktopDescription>
           </div>
           <div className="field">
             <label className="field__label" htmlFor="vault-create-confirm">

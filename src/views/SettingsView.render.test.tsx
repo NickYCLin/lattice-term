@@ -1,3 +1,4 @@
+import { zhTW } from "../i18n/messages/zh-TW";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { defaultPreferences } from "../app/preferences";
@@ -93,12 +94,11 @@ describe("Settings updater platform boundary", () => {
     expect(markup).toContain("尚未提供所選語言的文字會顯示英文");
   });
 
-  it("directs iOS users to their Apple installation channel", () => {
+  it("keeps the iOS installation channel title without its explanatory tutorial", () => {
     const markup = renderSettings("ios");
 
     expect(markup).toContain("透過原安裝來源更新");
-    expect(markup).toContain("TestFlight");
-    expect(markup).toContain("App Store");
+    expect(markup).not.toContain(zhTW["settings.updater.iosHint"]);
     expect(markup).toContain("iPhone／iPad App");
     expect(markup).not.toContain("拿手機相機掃這個 QR");
     expect(markup).toContain("閱讀資料使用與隱私權說明");
@@ -162,9 +162,19 @@ it.each(["ios", "android"])("hides local chat and memory settings on %s while ke
   const html = renderSettings(platform);
   expect(html).not.toContain(">對話輸入</h2>");
   for (const label of ["送出快捷鍵", "進行中送出", "記憶與交接壓縮", "用 AI 摘要記憶"]) expect(html).not.toContain(label);
-  for (const label of ["介面字級", "語言", "音效", "加密備份"]) expect(html).toContain(label);
+  for (const label of ["介面字級", "語言", "提示音音量", "加密備份"]) expect(html).toContain(label);
 });
 it.each(["linux", "macos"])("retains local chat and memory settings on %s", platform => {
   const html=renderSettings(platform);
   expect(html).toContain(">對話輸入</h2>");expect(html).toContain("記憶與交接壓縮");
+});
+
+it.each(["ios", "android"])("hides settings explanations on %s while retaining titles and controls", platform => {
+  const mobile = renderSettings(platform), desktop = renderSettings("linux");
+  for (const hint of ["interface-text-scale-hint", "output-font-size-hint"]) {
+    expect(mobile).not.toContain(hint); expect(desktop).toContain(hint);
+  }
+  expect(mobile).not.toContain('class="theme-option__hint"');
+  expect(desktop).toContain('class="theme-option__hint"');
+  for (const text of ["介面字級", "輸出字級", "加密備份"]) expect(mobile).toContain(text);
 });

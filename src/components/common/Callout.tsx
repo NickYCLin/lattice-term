@@ -1,3 +1,4 @@
+import { DesktopDescription } from "./MobilePresentation";
 /**
  * Callouts, keyboard hints and empty states.
  *
@@ -77,9 +78,9 @@ export function EmptyState({
         {icon}
       </span>
       <h3 className="empty-state__title">{title}</h3>
-      <p className="empty-state__text">{description}</p>
+      <DesktopDescription><p className="empty-state__text">{description}</p></DesktopDescription>
       {actions && <div className="empty-state__actions">{actions}</div>}
-      {footnote && <p className="empty-state__footnote">{footnote}</p>}
+      {footnote && <DesktopDescription><p className="empty-state__footnote">{footnote}</p></DesktopDescription>}
     </div>
   );
 }

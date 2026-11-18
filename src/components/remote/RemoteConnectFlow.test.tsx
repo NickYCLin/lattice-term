@@ -1,5 +1,7 @@
+import { zhTW } from "../../i18n/messages/zh-TW";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import type { VaultApi } from "../../app/useVault";
 import type { RemoteApi } from "../../app/useRemoteSessions";
 import type { SavedCredentialState } from "../../app/useSavedCredential";
 import type { ConnectionProfile } from "../../domain/connection";
@@ -43,10 +45,11 @@ const remote = {
   connect: vi.fn(),
 } as unknown as RemoteApi;
 
-function render(relay: boolean) {
+function render(relay: boolean, platform?: string) {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
       <RemoteConnectFlow
+        platform={platform}
         profile={profile(relay)}
         remote={remote}
         onConnected={vi.fn()}
@@ -90,4 +93,24 @@ describe("RemoteConnectFlow", () => {
     expect(markup).toContain("刪除已儲存配對碼");
     expect(markup).not.toContain("12345678");
   });
+});
+
+it.each(["ios", "android"])("removes pairing explanations on %s but keeps fields and saved-code actions", platform => {
+  credential.state = { mode: "missing", provider: "Fixture store", detail: null };
+  for (const relay of [true, false]) {
+    const mobile = render(relay, platform), desktop = render(relay, "linux");
+    for (const text of ["加密配對與安全儲存", "配對碼只用於 Noise", "區分大小寫"]) expect(mobile).not.toContain(text);
+    expect(mobile).not.toContain('aria-describedby="remote-pairing-code-hint"');
+    expect(desktop).toContain('id="remote-pairing-code-hint"');
+    expect(mobile).toContain('id="remote-pairing-code"'); expect(mobile).toContain("連線"); expect(mobile).toContain("取消");
+  }
+  credential.state = { mode: "saved", provider: "Fixture store", detail: null };
+  const saved = render(true, platform);
+  expect(saved).toContain("配對碼已安全保存"); expect(saved).toContain("使用 Fixture store 中已儲存的配對碼"); expect(saved).toContain("刪除已儲存配對碼");
+});
+
+it("keeps the iPhone device-storage title and action, omitting only its long description", () => {
+  credential.state = { mode: "missing", provider: "Fixture store", detail: null };
+  const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><RemoteConnectFlow profile={profile(true)} remote={remote} platform="ios" vault={{ backend: "vault", status: { state: "locked" }, busy: false, problem: null } as VaultApi} onConnected={vi.fn()} onCancel={vi.fn()} /></I18nProvider>);
+  expect(markup).toContain("在這支 iPhone 記住配對碼"); expect(markup).toContain("使用 iOS 安全儲存區保存"); expect(markup).not.toContain(zhTW["remote.connect.deviceStorageBody"]);
 });

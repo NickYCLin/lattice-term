@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { jumpError } from "../../app/jumpRoutes";
 import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { PathDropZone } from "../files/PathDropZone";
@@ -529,7 +530,7 @@ export function ConnectFlow({
                 spellCheck={false}
                 disabled={busy}
               />
-              <p className="field__optional">{t("connect.passwordHint")}</p>
+              <DesktopDescription><p className="field__optional">{t("connect.passwordHint")}</p></DesktopDescription>
             </div>
           )}
 
@@ -571,7 +572,7 @@ export function ConnectFlow({
                     ))}
                   </datalist>
                 )}
-                <p className="field__optional">{t("connect.keyPath.hint")}</p>
+                <DesktopDescription><p className="field__optional">{t("connect.keyPath.hint")}</p></DesktopDescription>
               </div>
 
               <div className="field">
@@ -588,7 +589,7 @@ export function ConnectFlow({
                   spellCheck={false}
                   disabled={busy}
                 />
-                <p className="field__optional">{t("connect.passphrase.hint")}</p>
+                <DesktopDescription><p className="field__optional">{t("connect.passphrase.hint")}</p></DesktopDescription>
               </div>
             </>
           )}

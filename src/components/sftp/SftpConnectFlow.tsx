@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { jumpError } from "../../app/jumpRoutes";
 import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -379,7 +380,7 @@ export function SftpConnectFlow({
                 spellCheck={false}
                 disabled={busy}
               />
-              <p className="field__optional">{t("connect.passwordHint")}</p>
+              <DesktopDescription><p className="field__optional">{t("connect.passwordHint")}</p></DesktopDescription>
             </div>
           )}
 

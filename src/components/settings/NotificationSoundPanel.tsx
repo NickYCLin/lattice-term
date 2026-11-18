@@ -1,3 +1,4 @@
+import { DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import { useRef, useState } from "react";
 import type { Preferences } from "../../app/preferences";
 import {
@@ -14,6 +15,7 @@ export function NotificationSoundPanel({ preferences, onChange }: {
   onChange: (patch: Partial<Preferences>) => void;
 }) {
   const { t } = useI18n();
+  const mobile = useMobilePresentation();
   const [playing, setPlaying] = useState<NotificationSoundChoice | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const busy = useRef(false);
@@ -65,7 +67,7 @@ export function NotificationSoundPanel({ preferences, onChange }: {
         <span className="checkbox__box" aria-hidden="true">✓</span>
         <span>
           <strong>{t("settings.notifications.system")}</strong>
-          <small className="field__optional">{t("settings.notifications.systemHint")}</small>
+          <DesktopDescription><small className="field__optional">{t("settings.notifications.systemHint")}</small></DesktopDescription>
         </span>
       </label>
       <div className="sound-volume">
@@ -75,7 +77,7 @@ export function NotificationSoundPanel({ preferences, onChange }: {
           onChange={(e) => onChange({ notificationVolume: Number(e.target.value) })} />
         <output htmlFor="notification-volume">{preferences.notificationVolume}%</output>
       </div>
-      <p className="setting__description">{t(preferences.notificationVolume === 0 ? "settings.notifications.muted" : "settings.notifications.libraryHint")}</p>
+      {(!mobile || preferences.notificationVolume === 0) && <p className="setting__description">{t(preferences.notificationVolume === 0 ? "settings.notifications.muted" : "settings.notifications.libraryHint")}</p>}
       <div className="sound-library">
         {notificationSoundGroups.map((group) => (
           <section className="sound-group" key={group.id} aria-label={t(`settings.notifications.group.${group.id}`)}>
@@ -85,7 +87,7 @@ export function NotificationSoundPanel({ preferences, onChange }: {
                 disabled={playing !== null || preferences.notificationVolume === 0}
                 aria-label={`${t("settings.notifications.preview")}：${t(`settings.notifications.sound.${sound}`)}`}
                 onClick={() => void preview(sound)}>
-                <span><strong>{t(`settings.notifications.sound.${sound}`)}</strong><small>{t(`settings.notifications.hint.${sound}`)}</small></span>
+                <span><strong>{t(`settings.notifications.sound.${sound}`)}</strong><DesktopDescription><small>{t(`settings.notifications.hint.${sound}`)}</small></DesktopDescription></span>
                 <PlayIcon size={15} />
               </button>
             ))}

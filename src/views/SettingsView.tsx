@@ -1,3 +1,4 @@
+import { MobilePresentationProvider, DesktopDescription } from "../components/common/MobilePresentation";
 /**
  * Settings.
  *
@@ -109,7 +110,7 @@ function SegmentedSetting<T extends string>({
     <div className="setting">
       <div className="setting__text">
         <strong className="setting__title">{title}</strong>
-        <p className="setting__description">{description}</p>
+        <DesktopDescription><p className="setting__description">{description}</p></DesktopDescription>
       </div>
       <div className="segmented" role="radiogroup" aria-label={title}>
         {choices.map((choice, index) => (
@@ -152,7 +153,7 @@ function LanguageSetting({
           <GlobeIcon size={15} />
           {t("settings.language")}
         </strong>
-        <p className="setting__description">{t("settings.languageHint")}</p>
+        <DesktopDescription><p className="setting__description">{t("settings.languageHint")}</p></DesktopDescription>
       </div>
       <div
         className="language-grid"
@@ -264,12 +265,12 @@ export function SettingsView({
   const [motionPreview, setMotionPreview] = useState(0);
 
   return (
-    <div className="stack settings-panels">
+    <MobilePresentationProvider platform={summary?.platform}><div className="stack settings-panels">
       <section className="panel glass glass--sheen">
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.appearance")}</h2>
-            <p className="panel__hint">{t("settings.appearanceHint")}</p>
+            <DesktopDescription><p className="panel__hint">{t("settings.appearanceHint")}</p></DesktopDescription>
           </div>
         </header>
 
@@ -278,7 +279,7 @@ export function SettingsView({
         <div className="setting">
           <div className="setting__text">
             <strong className="setting__title">{t("settings.theme")}</strong>
-            <p className="setting__description">{t("settings.themeHint")}</p>
+            <DesktopDescription><p className="setting__description">{t("settings.themeHint")}</p></DesktopDescription>
           </div>
         </div>
 
@@ -321,7 +322,7 @@ export function SettingsView({
                     </span>
                   )}
                 </span>
-                <span className="theme-option__hint">{t(theme.hintKey)}</span>
+                <DesktopDescription><span className="theme-option__hint">{t(theme.hintKey)}</span></DesktopDescription>
               </button>
             );
           })}
@@ -360,7 +361,7 @@ export function SettingsView({
             </div>
             <div className="motion-preview__text">
               <strong>{t("settings.motion.previewTitle")}</strong>
-              <small>{t("settings.motion.previewHint")}</small>
+              <DesktopDescription><small>{t("settings.motion.previewHint")}</small></DesktopDescription>
             </div>
             <button type="button" className="button button--secondary button--sm" onClick={() => setMotionPreview((value) => value + 1)}>
               <PlayIcon size={13} />{t("settings.motion.preview")}
@@ -375,7 +376,7 @@ export function SettingsView({
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.notifications")}</h2>
-            <p className="panel__hint">{t("settings.notificationsHint")}</p>
+            <DesktopDescription><p className="panel__hint">{t("settings.notificationsHint")}</p></DesktopDescription>
           </div>
         </header>
         <NotificationSoundPanel preferences={preferences} onChange={onChange} />
@@ -385,7 +386,7 @@ export function SettingsView({
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.storage")}</h2>
-            <p className="panel__hint">{t("settings.storageHint")}</p>
+            <DesktopDescription><p className="panel__hint">{t("settings.storageHint")}</p></DesktopDescription>
           </div>
         </header>
 
@@ -428,20 +429,20 @@ export function SettingsView({
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.security")}</h2>
-            <p className="panel__hint">
+            <DesktopDescription><p className="panel__hint">
               {host === "tauri"
                 ? t("settings.securityHint")
                 : host === "browser"
                   ? t("settings.security.browserHint")
                   : t("common.detecting")}
-            </p>
+            </p></DesktopDescription>
           </div>
         </header>
 
         {desktopBackendAvailable ? (
-          <Callout tone="security" title={t("settings.security.title")}>
+          <DesktopDescription><Callout tone="security" title={t("settings.security.title")}>
             {t("settings.security.body")}
-          </Callout>
+          </Callout></DesktopDescription>
         ) : host === "browser" ? (
           <Callout tone="info" title={t("settings.security.browser.title")}>
             {t("settings.security.browser.body")}
@@ -490,9 +491,9 @@ export function SettingsView({
               <strong className="setting__title">
                 {t("settings.security.clipboard.clearNow")}
               </strong>
-              <p className="setting__description">
+              <DesktopDescription><p className="setting__description">
                 {t("settings.security.clipboard.clearNowDetail")}
-              </p>
+              </p></DesktopDescription>
               {clipboardNotice && (
                 <p className="setting__description" aria-live="polite">
                   {t(clipboardNotice)}
@@ -533,7 +534,7 @@ export function SettingsView({
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.about")}</h2>
-            <p className="panel__hint">{t("settings.aboutHint")}</p>
+            <DesktopDescription><p className="panel__hint">{t("settings.aboutHint")}</p></DesktopDescription>
           </div>
         </header>
 
@@ -585,9 +586,9 @@ export function SettingsView({
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.updater")}</h2>
-            <p className="panel__hint">
+            <DesktopDescription><p className="panel__hint">
               {t(usesAppleUpdates ? "settings.updater.iosHint" : "settings.updaterHint")}
-            </p>
+            </p></DesktopDescription>
           </div>
           {inAppUpdaterAvailable &&
             updater.status !== "available" &&
@@ -690,9 +691,9 @@ export function SettingsView({
             >
               {t("settings.updater.download")}
             </button>
-            <p className="text-muted" style={{ margin: 0, fontSize: "var(--text-sm)" }}>
+            <DesktopDescription><p className="text-muted" style={{ margin: 0, fontSize: "var(--text-sm)" }}>
               {t("settings.updater.autoRestartHint")}
-            </p>
+            </p></DesktopDescription>
           </div>
         )}
 
@@ -726,7 +727,7 @@ export function SettingsView({
         <header className="panel__head">
           <div>
             <h2 className="panel__title">{t("settings.mobile")}</h2>
-            <p className="panel__hint">{t("settings.mobileHint")}</p>
+            <DesktopDescription><p className="panel__hint">{t("settings.mobileHint")}</p></DesktopDescription>
           </div>
         </header>
 
@@ -740,7 +741,7 @@ export function SettingsView({
             />
           </div>
           <div className="mobile-download__body">
-            <p className="mobile-download__lead">{t("settings.mobile.scan")}</p>
+            <DesktopDescription><p className="mobile-download__lead">{t("settings.mobile.scan")}</p></DesktopDescription>
             <ul className="mobile-download__list">
               <li>{t("settings.mobile.android")}</li>
               <li><a href="https://apps.apple.com/app/latticeterm/id6808952335" target="_blank" rel="noreferrer">{t("settings.mobile.ios")}</a></li>
@@ -757,6 +758,6 @@ export function SettingsView({
         </div>
       </section>
       )}
-    </div>
+    </div></MobilePresentationProvider>
   );
 }

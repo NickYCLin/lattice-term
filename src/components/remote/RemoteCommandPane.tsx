@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { useState } from "react";
 import { plainTextInputProps, unsweetenPunctuation } from "../../app/plainTextInput";
 import type { RemoteSessionSummary } from "../../app/useRemoteSessions";
@@ -84,7 +85,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
   };
   return <aside className="remote-workspace__files remote-command-pane" hidden={hidden} aria-label={t("remote.commands.title")}>
     <strong>{t("remote.commands.title")}</strong>
-    <p className="muted">{t("remote.commands.hint")}</p>
+    <DesktopDescription><p className="muted">{t("remote.commands.hint")}</p></DesktopDescription>
     <form onSubmit={event => {
       event.preventDefault();
       run();
@@ -108,7 +109,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
           else run();
         }} />
       </label>
-      <p className="muted remote-command-submit-hint">{t(enterInsertsNewline ? "remote.commands.submitHintTouch" : "remote.commands.submitHint")}</p>
+      <DesktopDescription><p className="muted remote-command-submit-hint">{t(enterInsertsNewline ? "remote.commands.submitHintTouch" : "remote.commands.submitHint")}</p></DesktopDescription>
       <label className="field">{t("remote.commands.timeout")}
         <select className="input" value={seconds} disabled={busy || active} onChange={e => setSeconds(Number(e.currentTarget.value))}>
           {[30, 60, 300].map(value => <option key={value} value={value}>{value} {t("remote.commands.seconds")}</option>)}

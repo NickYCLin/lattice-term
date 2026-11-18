@@ -1,3 +1,4 @@
+import { DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import type { JumpRequest } from "../../app/jumpRoutes";
 import { JumpAuthenticationDialog } from "./JumpAuthenticationDialog";
 import { databaseErrorMessage } from "../../app/databaseErrors";
@@ -31,6 +32,7 @@ export function DatabaseManager({ initialDirect = false, profiles, hostKeys, def
   onStateChange?: (state: { busy: boolean; dirty: boolean }) => void;
 }) {
   const { t } = useI18n();
+  const mobile = useMobilePresentation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
@@ -192,7 +194,7 @@ export function DatabaseManager({ initialDirect = false, profiles, hostKeys, def
             })}>{t("database.reloadDiscard")}</button></div>
           </aside>
           <section className="database-manager__workspace" aria-label={t("database.content")}>
-            <div className="database-manager__connection-head"><div><h3>{saved?.name || t("database.create")}</h3><p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? t("database.localFile") : `${saved.hostname}:${saved.port} / ${saved.database}`}` : t("database.workspaceHint")}</p></div><span className="database-manager__badge">{saved ? t("database.saved") : t("database.unsaved")}</span></div>
+            <div className="database-manager__connection-head"><div><h3>{saved?.name || t("database.create")}</h3>{(saved || !mobile) && <p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? t("database.localFile") : `${saved.hostname}:${saved.port} / ${saved.database}`}` : t("database.workspaceHint")}</p>}</div><span className="database-manager__badge">{saved ? t("database.saved") : t("database.unsaved")}</span></div>
             {!settingsOnly && !direct && saved?.route?.kind === "ssh" && jumpAuth?.profileId !== saved.route.profileId && (() => {
               const gateway = profiles.find(profile => profile.id === saved.route?.profileId && profile.protocol === "ssh");
               return gateway ? <JumpAuthenticationDialog key={gateway.id} gateway={gateway} onContinue={setJumpAuth} onCancel={onClose} /> : <p role="alert">{t("jump.missing")}</p>;
@@ -215,13 +217,13 @@ export function DatabaseManager({ initialDirect = false, profiles, hostKeys, def
               {!!snapshot?.credentialCleanupPending && <div role="alert" className="database-manager__notice"><p>{t("database.cleanupPending", { count: snapshot.credentialCleanupPending })}</p><button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
                 const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
               })}>{t("database.retryCleanup")}</button></div>}
-          {onConfigure && activeView === "settings" && <div className="database-manager__section-heading"><h3>{t("database.add")}</h3><p>{t("database.standaloneHint")}</p><button type="button" className="button button--primary" onClick={() => onConfigure(saved?.id, saved?.hostKey ?? defaultHostKey)}>{t("database.configure")}</button></div>}
+          {onConfigure && activeView === "settings" && <div className="database-manager__section-heading"><h3>{t("database.add")}</h3><DesktopDescription><p>{t("database.standaloneHint")}</p></DesktopDescription><button type="button" className="button button--primary" onClick={() => onConfigure(saved?.id, saved?.hostKey ?? defaultHostKey)}>{t("database.configure")}</button></div>}
           <form id={settingsFormId} onSubmit={save} className="database-manager__settings" hidden={activeView !== "settings" || Boolean(onConfigure)}>
-            <div className="database-manager__section-heading"><h3 className="visually-hidden">{saved ? t("database.settings") : t("database.add")}</h3><p>{t("database.settingsHint")}</p></div>
+            <div className="database-manager__section-heading"><h3 className="visually-hidden">{saved ? t("database.settings") : t("database.add")}</h3><DesktopDescription><p>{t("database.settingsHint")}</p></DesktopDescription></div>
             <fieldset disabled={busy || !snapshot} className="database-manager__fields">
               <legend className="visually-hidden">{t("database.loginSettings")}</legend>
               <section className="database-manager__form-card" aria-label={t("database.location")}>
-                <h4 className="database-manager__form-section"><span>01</span><span>{t("database.location")}<small>{t("database.locationHint")}</small></span></h4>
+                <h4 className="database-manager__form-section"><span>01</span><span>{t("database.location")}<DesktopDescription><small>{t("database.locationHint")}</small></DesktopDescription></span></h4>
                 <div className="database-manager__field-grid">
                   <label className="database-manager__span">{t("database.name")}<input className="input" placeholder={t("database.namePlaceholder")} required maxLength={100} value={draft.name} onChange={(event) => update("name", event.target.value)} /></label>
                   {draft.engine !== "sqlite" && <>
@@ -233,7 +235,7 @@ export function DatabaseManager({ initialDirect = false, profiles, hostKeys, def
                       <option value="direct">{t("database.direct")}</option>
                       {profiles.filter(profile => profile.protocol === "ssh" || profile.protocol === "lattice").map(profile => <option key={profile.id} value={`${profile.protocol === "ssh" ? "ssh" : "remote"}:${profile.id}`}>{profile.protocol === "ssh" ? t("database.sshTunnel") : t("database.remoteTunnel")}：{profile.name}</option>)}
                     </select></label>
-                    <p className="database-manager__hint database-manager__span">{t("database.routeHint")}</p>
+                    <DesktopDescription><p className="database-manager__hint database-manager__span">{t("database.routeHint")}</p></DesktopDescription>
                   </>}
                   <label className="database-manager__span">{t("database.engine")}<select value={draft.engine} onChange={(event) => {
                     setTouched(true); setDraft(changeDatabaseEngine(draft, event.target.value as DatabaseProfile["engine"]));
@@ -250,35 +252,35 @@ export function DatabaseManager({ initialDirect = false, profiles, hostKeys, def
                       {draft.hostKey !== "local" && !cardTargets.has(draft.hostKey) && <option value={draft.hostKey}>{profiles.find(profile => profile.id === draft.hostKey)?.name ?? t("database.removedCard")}</option>}
                       {[...cardTargets].map(([key, profile]) => <option key={key} value={key}>{profile.name}</option>)}
                     </select></label>
-                    <p className="database-manager__hint">{t("database.cardHint")}</p>
+                    <DesktopDescription><p className="database-manager__hint">{t("database.cardHint")}</p></DesktopDescription>
                   </details>
                 </div>
               </section>
               <section className="database-manager__form-card" aria-label={t("database.loginPermissions")}>
-                <h4 className="database-manager__form-section"><span>02</span><span>{t("database.login")}<small>{t("database.passwordHint")}</small></span></h4>
+                <h4 className="database-manager__form-section"><span>02</span><span>{t("database.login")}<DesktopDescription><small>{t("database.passwordHint")}</small></DesktopDescription></span></h4>
                 <div className="database-manager__field-grid">
-                  {draft.engine === "sqlite" ? <p className="database-manager__hint database-manager__span">{t("database.sqliteLoginHint")}</p> : <>
+                  {draft.engine === "sqlite" ? <DesktopDescription><p className="database-manager__hint database-manager__span">{t("database.sqliteLoginHint")}</p></DesktopDescription> : <>
                     <label className="database-manager__span">{t("database.username")}<input className="input" placeholder={t("database.usernamePlaceholder")} autoCapitalize="none" autoCorrect="off" spellCheck={false} required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
-                    <div className="database-manager__password database-manager__span"><label>{t("database.password")}<input className="input" type={showPassword ? "text" : "password"} autoComplete="new-password" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={saved ? t("database.keepPassword") : t("database.enterPassword")} value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label><button type="button" className="button button--secondary" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? t("database.hidePassword") : t("database.showPassword")}</button><small>{t("database.passwordEndpointHint")}</small></div>
+                    <div className="database-manager__password database-manager__span"><label>{t("database.password")}<input className="input" type={showPassword ? "text" : "password"} autoComplete="new-password" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={saved ? t("database.keepPassword") : t("database.enterPassword")} value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label><button type="button" className="button button--secondary" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? t("database.hidePassword") : t("database.showPassword")}</button><DesktopDescription><small>{t("database.passwordEndpointHint")}</small></DesktopDescription></div>
                   </>}
                   {draft.engine !== "sqlite" && <>
                     <details className="database-manager__advanced database-manager__span" data-database-tls>
                       <summary>{t("database.tls.advanced")}</summary>
                       <label>{t("database.tls.ca")}<textarea className="textarea" rows={5} maxLength={16384} spellCheck={false}
                         autoComplete="off" value={draft.tlsCaPem ?? ""} onChange={event => update("tlsCaPem", event.target.value)} /></label>
-                      <p className="database-manager__hint">{t("database.tls.caHint")}</p>
+                      <DesktopDescription><p className="database-manager__hint">{t("database.tls.caHint")}</p></DesktopDescription>
                       <label className="database-manager__permission"><input type="checkbox" name="tlsTrustServerCertificate"
                         checked={!draft.tlsCaPem?.trim() && (draft.tlsTrustServerCertificate ?? true)}
                         disabled={Boolean(draft.tlsCaPem?.trim())}
                         onChange={event => update("tlsTrustServerCertificate", event.target.checked)} />{t("database.tls.trust")}</label>
-                      <p className="database-manager__hint">{t(draft.tlsCaPem?.trim() ? "database.tls.caOverrides" : "database.tls.defaultHint")}</p>
-                      {draft.route && verifiesDatabaseCertificate(draft) && <p className="database-manager__hint">{t("database.tls.routeHint")}</p>}
+                      <DesktopDescription><p className="database-manager__hint">{t(draft.tlsCaPem?.trim() ? "database.tls.caOverrides" : "database.tls.defaultHint")}</p></DesktopDescription>
+                      {draft.route && verifiesDatabaseCertificate(draft) && <DesktopDescription><p className="database-manager__hint">{t("database.tls.routeHint")}</p></DesktopDescription>}
                     </details>
                     {settingsOnly && <p className="database-manager__hint database-manager__span" role="status">{t(verifiesDatabaseCertificate(draft) ? "database.tls.verifying" : "database.tls.unverified")}</p>}
                   </>}
-                  <div className="database-manager__form-section database-manager__span"><span>03</span><span>{t("database.aiAccess")}<small>{t("database.aiAccessHint")}</small></span></div>
+                  <div className="database-manager__form-section database-manager__span"><span>03</span><span>{t("database.aiAccess")}<DesktopDescription><small>{t("database.aiAccessHint")}</small></DesktopDescription></span></div>
                   <label className="database-manager__permission database-manager__span"><input type="checkbox" name="allowMcpRead" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />{t("database.allowRead")}</label>
-                  <p className="database-manager__hint database-manager__span">{t("database.credentialHint")}</p>
+                  <DesktopDescription><p className="database-manager__hint database-manager__span">{t("database.credentialHint")}</p></DesktopDescription>
                 </div>
               </section>
               <div className="database-manager__actions database-manager__save-bar database-manager__span">
@@ -299,7 +301,7 @@ export function DatabaseManager({ initialDirect = false, profiles, hostKeys, def
               </div>}
             </fieldset>
           </form>
-        <section className="database-manager__browse" aria-label={t("database.readOnlyBrowse")} hidden={activeView !== "tables"}><div className="database-manager__section-heading"><h3>{t("database.browse")}</h3><p>{t("database.browseHint")}</p></div>
+        <section className="database-manager__browse" aria-label={t("database.readOnlyBrowse")} hidden={activeView !== "tables"}><div className="database-manager__section-heading"><h3>{t("database.browse")}</h3><DesktopDescription><p>{t("database.browseHint")}</p></DesktopDescription></div>
           <div className="database-manager__actions">
             <button type="button" className="button button--secondary" disabled={busy || dirty} onClick={() => read("version")}>{t("database.readVersion")}</button>
             <button type="button" className="button button--secondary" disabled={busy || dirty} onClick={() => read("tables")}>{t("database.listTables")}</button>

@@ -1,3 +1,5 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { MobilePresentationProvider } from "../common/MobilePresentation";
 import { zhTW } from "../../i18n/messages/zh-TW";
 import { en } from "../../i18n/messages/en";
 import { I18nProvider } from "../../i18n";
@@ -393,4 +395,10 @@ it("saves explicit verification without a CA and clears TLS settings for SQLite"
   }) }));
   await change(props => props.value === "postgres" && Array.isArray(props.children), { value: "sqlite" });
   expect(hostProps(container).some(props => props["data-database-tls"])).toBe(false);
+});
+
+it.each([false, true])("shows database labels and actions without mobile form explanations: mobile=%s", mobile => {
+  const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><MobilePresentationProvider mobile={mobile}><DatabaseManager profiles={[]} onClose={vi.fn()} /></MobilePresentationProvider></I18nProvider>);
+  for (const key of ["database.workspaceHint", "database.settingsHint", "database.locationHint", "database.passwordHint", "database.passwordEndpointHint", "database.aiAccessHint", "database.credentialHint"] as const) expect(markup.includes(zhTW[key])).toBe(!mobile);
+  for (const key of ["database.hostname", "database.username", "database.password", "database.save"] as const) expect(markup).toContain(zhTW[key]);
 });

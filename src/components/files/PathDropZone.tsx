@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { useRef, useState, type ReactNode } from "react";
 import { useFileDrop, useFileDropLifetime } from "../../app/fileDrop";
 import { inspectLocalPath, localFileError } from "../../app/localFiles";
@@ -31,7 +32,7 @@ export function PathDropZone({ kind, disabled = false, compact = false, onSelect
   });
   return <div ref={ref} className={`path-drop-zone${dragging ? " is-file-dropping" : ""}`}>
     {children}
-    <small className={compact ? "visually-hidden" : "field__hint"}>{t(kind === "file" ? "localFile.dropFile" : "localFile.dropDirectory")}</small>
+    <DesktopDescription><small className={compact ? "visually-hidden" : "field__hint"}>{t(kind === "file" ? "localFile.dropFile" : "localFile.dropDirectory")}</small></DesktopDescription>
     {problem && <p className="field__error" role="alert">{problem}</p>}
   </div>;
 }

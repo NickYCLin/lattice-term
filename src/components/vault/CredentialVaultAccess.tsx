@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { useRef, useState, type KeyboardEvent } from "react";
 import type { VaultApi } from "../../app/useVault";
 import { useI18n } from "../../i18n/context";
@@ -59,7 +60,7 @@ export function CredentialVaultAccess({ vault, disabled, onReady }: {
           autoComplete={creating ? "new-password" : "current-password"} disabled={blocked}
           onChange={event => setHasPassword(creating ? event.currentTarget.value.length >= 8 : event.currentTarget.value.length > 0)}
           onKeyDown={onKeyDown} />
-        {creating && <p className="field__optional">{t("vault.encrypted.masterHint")}</p>}
+        {creating && <DesktopDescription><p className="field__optional">{t("vault.encrypted.masterHint")}</p></DesktopDescription>}
       </div>
       {creating && <div className="field">
         <label className="field__label" htmlFor="credential-vault-confirm">{t("vault.encrypted.confirmPassword")}</label>

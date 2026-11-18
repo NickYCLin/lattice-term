@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { useCallback, useEffect, useState } from "react";
 import type { ConnectionProfile } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
@@ -117,15 +118,15 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
     <header className="panel__head"><div><h2 className="panel__title">{t("settings.mcpRemote.title")}</h2>
-      <p className="panel__hint">{t("settings.mcpRemote.hint")}</p></div></header>
+      <DesktopDescription><p className="panel__hint">{t("settings.mcpRemote.hint")}</p></DesktopDescription></div></header>
     <div className="mcp-remote__body">
-      <p>{t("settings.mcpRemote.boundary")}</p>
+      <DesktopDescription><p>{t("settings.mcpRemote.boundary")}</p></DesktopDescription>
       {available && <label className="checkbox mcp-remote__book">
         <input type="checkbox" checked={book} disabled={busy}
           onChange={(event) => void shareBook(event.currentTarget.checked)} />
         <span className="checkbox__box" aria-hidden="true">✓</span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.book")}</strong>
-          <span>{t("settings.mcpRemote.book.hint")}</span></span>
+          <DesktopDescription><span>{t("settings.mcpRemote.book.hint")}</span></DesktopDescription></span>
       </label>}
       {available && <label className="checkbox mcp-remote__book">
         <input type="checkbox" checked={trustAll} disabled={busy}
@@ -139,7 +140,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
           onChange={(event) => void shareRemote(event.currentTarget.checked)} />
         <span className="checkbox__box" aria-hidden="true">✓</span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.autoAllow")}</strong>
-          <span>{t("settings.mcpRemote.autoAllow.hint")}</span></span>
+          <DesktopDescription><span>{t("settings.mcpRemote.autoAllow.hint")}</span></DesktopDescription></span>
       </label>}
       {error && <p role="alert">{error}</p>}
       {available && trusted.length > 0 && <div className="mcp-remote__trusted">

@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../components/common/MobilePresentation";
 /**
  * SSH Tunnels & Port Forwarding View.
  *
@@ -332,9 +333,9 @@ export function TunnelsView({
           <h3 style={{ margin: "0 0 var(--space-2)", fontSize: "var(--text-lg)", color: "var(--text)" }}>
             {search ? t("tunnels.emptySearch") : t("tunnels.empty")}
           </h3>
-          <p style={{ margin: "0 0 var(--space-5)", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+          <DesktopDescription><p style={{ margin: "0 0 var(--space-5)", color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
             {t("tunnels.emptyHint")}
-          </p>
+          </p></DesktopDescription>
           {!search && (
             <button
               type="button"
@@ -896,7 +897,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
               <strong style={{ display: "block", color: "var(--text)", fontSize: "var(--text-sm)" }}>
                 {t("tunnels.form.autoStart")}
               </strong>
-              <small style={{ color: "var(--text-muted)" }}>{t("tunnels.form.autoStartHint")}</small>
+              <DesktopDescription><small style={{ color: "var(--text-muted)" }}>{t("tunnels.form.autoStartHint")}</small></DesktopDescription>
             </span>
           </label>
 

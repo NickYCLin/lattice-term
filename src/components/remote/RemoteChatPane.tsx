@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { preserveTerminalButtonFocus } from "../terminal/terminalPointerFocus";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { stripAgentMetadata } from "../../app/chatMarkdown";
@@ -139,7 +140,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
     </header>
     {problem && <p role="alert">{problem}</p>}
     {!selected ? <div className="remote-chat-list">
-      <p className="muted">{t("remote.chat.hint")}</p>
+      <DesktopDescription><p className="muted">{t("remote.chat.hint")}</p></DesktopDescription>
       <input type="search" className="input remote-chat-search" aria-label={t("remote.chat.search")} placeholder={t("remote.chat.search")} value={query} onChange={event => setQuery(event.currentTarget.value)} />
       <div className="remote-cli-filters" role="group" aria-label={t("remote.chat.filter")}>
         {(["all", "working", "needsAttention", "idle"] as const).map(state => <button type="button" key={state} className={`remote-cli-filter${activity === state ? " is-active" : ""}`} aria-pressed={activity === state} onClick={() => setActivity(state)}>

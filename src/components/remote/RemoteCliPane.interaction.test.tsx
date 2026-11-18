@@ -1,3 +1,5 @@
+import { MobilePresentationProvider } from "../common/MobilePresentation";
+import { zhTW } from "../../i18n/messages/zh-TW";
 import { act, StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -119,7 +121,7 @@ it("finds working sessions first in a large list and combines status with projec
   } finally { await act(async () => root.unmount()); }
 });
 
-async function uploadHarness(replayPending = false) {
+async function uploadHarness(replayPending = false, mobile = false, truncated = false) {
   vi.useFakeTimers();
   await import("@tauri-apps/api/core");
   const container = installHostDom();
@@ -132,17 +134,17 @@ async function uploadHarness(replayPending = false) {
     const op: RemoteCliOperation = request.operation;
     operations.push(op);
     const value = op.kind === "cliList" ? [{ id:"image-session", label:"Codex", groupLabel:"Image fixture", agent:"codex", state:"idle", detached:false }]
-      : op.kind === "cliRead" ? { sessionId:op.sessionId, cursor:op.cursor, nextCursor:0, endOffset:caughtUp ? 0 : 1, base64:"", truncated:false }
+      : op.kind === "cliRead" ? { sessionId:op.sessionId, cursor:op.cursor, nextCursor:0, endOffset:caughtUp ? 0 : 1, base64:"", truncated }
       : op.kind === "cliAttach" ? await attach(op) : op.kind === "cliInput" ? await input() : null;
     return { id:request.id, value, error:null };
   });
   const render = async (active = true, connection = "image-host") => {
-    await act(async () => root.render(<StrictMode><I18nProvider locale="zh-TW"><RemoteCliPane session={{sessionId:connection,cli:true} as RemoteSessionSummary} theme="dark" active={active} /></I18nProvider></StrictMode>));
+    await act(async () => root.render(<StrictMode><I18nProvider locale="zh-TW"><MobilePresentationProvider mobile={mobile}><RemoteCliPane session={{sessionId:connection,cli:true} as RemoteSessionSummary} theme="dark" active={active} /></MobilePresentationProvider></I18nProvider></StrictMode>));
   };
   const click = async (text:string) => { await act(async () => reactProps(allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.includes(text))!).onClick()); };
   await render();
   await click("Image fixture");
-  if (!replayPending) expect(container.textContent).toContain("已接上原本的助理");
+  if (!replayPending && !mobile) expect(container.textContent).toContain("已接上原本的助理");
   const pick = async () => {
     await act(async () => {
       reactProps(allNodes(container).find(node => node.tagName === "INPUT")!).onChange({target:{files:[{}],value:"fixture.png"}});
@@ -344,5 +346,22 @@ it("ignores an older in-flight output response after refreshing without remounti
     expect(rendered.text).toContain("FRESH"); expect(rendered.text).not.toContain("OLD");
     expect(rendered.mounts).toBe(mounts);
     expect(rendered.inputDisabled).toBe(false);
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it.each([false, true])("keeps errors and terminal actions but omits mobile CLI teaching/status paragraphs: mobile=%s", async mobile => {
+  const test = await uploadHarness(false, mobile, true);
+  try {
+    for (const key of ["remote.cli.ready", "remote.cli.truncated"] as const) expect(test.container.textContent.includes(zhTW[key])).toBe(!mobile);
+    await test.pick();
+    expect(test.container.textContent.includes(zhTW["remote.cli.imageSent"])).toBe(!mobile);
+    expect(test.container.textContent).toContain("Ctrl+C");
+    expect(allNodes(test.container).some(n => n.attributes["aria-label"] === "傳圖片給 CLI")).toBe(true);
+    test.setAttach(async () => { throw new Error("Synthetic upload failure"); });
+    await test.pick();
+    expect(test.container.textContent).toContain(zhTW["remote.cli.imageFailed"]);
+    test.setInput(async () => { throw new Error("Synthetic input failure"); });
+    await act(async () => { await rendered.remote!.terminalInput("image-session", "fixture"); await vi.advanceTimersByTimeAsync(35); });
+    expect(test.container.textContent).toContain(zhTW["remote.cli.error"]);
   } finally { await act(async () => test.root.unmount()); }
 });

@@ -1,3 +1,4 @@
+import { MobilePresentationProvider, DesktopDescription } from "../common/MobilePresentation";
 import { jumpGateways } from "../../app/jumpRoutes";
 /**
  * Add and edit connections in a centered modal.
@@ -368,7 +369,7 @@ export function ConnectionDrawer({
   };
 
   return (
-    <div className="scrim scrim--center connection-modal-scrim" role="presentation" onMouseDown={requestClose}>
+    <MobilePresentationProvider mobile={mobile}><div className="scrim scrim--center connection-modal-scrim" role="presentation" onMouseDown={requestClose}>
       <div
         className={`drawer connection-modal${databaseVisible ? " drawer--connection-database" : ""}`}
         role="dialog"
@@ -397,14 +398,14 @@ export function ConnectionDrawer({
         <div className="drawer__body" inert={saving}>
         {databaseAvailable && !profile && !databaseProfileId && !routeSource && <section className="connection-setup">
           <fieldset className="connection-setup__modes" disabled={saving || databaseState.busy || databaseState.dirty}><legend>{t("database.setupPurpose")}</legend>
-            {([ ["remote", t("database.remoteConnection"), t("database.remoteConnectionHint")], ["database", t("database.connection"), t("database.connectionHint")] ] as const).map(([value,label,hint]) => <label key={value} className={mode === value ? "is-selected" : ""}><input type="radio" name={`${formId}-purpose`} aria-label={label} checked={mode === value} onChange={() => selectPurpose(value)} /><span className="connection-setup__kind-icon" aria-hidden="true">{value === "remote" ? ">_" : "SQL"}</span><span><strong>{label}</strong><small>{hint}</small></span></label>)}
+            {([ ["remote", t("database.remoteConnection"), t("database.remoteConnectionHint")], ["database", t("database.connection"), t("database.connectionHint")] ] as const).map(([value,label,hint]) => <label key={value} className={mode === value ? "is-selected" : ""}><input type="radio" name={`${formId}-purpose`} aria-label={label} checked={mode === value} onChange={() => selectPurpose(value)} /><span className="connection-setup__kind-icon" aria-hidden="true">{value === "remote" ? ">_" : "SQL"}</span><span><strong>{label}</strong><DesktopDescription><small>{hint}</small></DesktopDescription></span></label>)}
           </fieldset>
-          {mode === "database" && <p>{t("database.saveOnlyHint")}</p>}
+          {mode === "database" && <DesktopDescription><p>{t("database.saveOnlyHint")}</p></DesktopDescription>}
         </section>}
         <form hidden={!remoteVisible} className="connection-drawer__remote-form" id={formId} onSubmit={submit} noValidate inert={databaseState.busy}>
           {(profile || routeSource) && <section className="form-section">
             <h3 className="form-section__title">{t("form.route.title")}</h3>
-            <p>{t("form.route.hint")}</p>
+            <DesktopDescription><p>{t("form.route.hint")}</p></DesktopDescription>
             <div className="connection-drawer__routes">
               {profiles.filter(entry => entry.id === (profile ?? routeSource)!.id ||
                 ((profile ?? routeSource)!.machineId && entry.machineId === (profile ?? routeSource)!.machineId)).map(entry =>
@@ -421,11 +422,11 @@ export function ConnectionDrawer({
               <h3 className="form-section__title">
                 {t("form.step.protocol")}
               </h3>
-              <span className="form-section__hint">
+              <DesktopDescription><span className="form-section__hint">
                 {t(protocolSummaryKey(draft.protocol))} · {t("form.defaultPort", {
                   port: findProtocol(draft.protocol).defaultPort,
                 })}
-              </span>
+              </span></DesktopDescription>
             </div>
             <div
               className="protocol-picker protocol-picker--compact"
@@ -486,7 +487,7 @@ export function ConnectionDrawer({
                 {jumpGateways(profiles, profile?.id).map(gateway => <option key={gateway.id} value={gateway.id}>{gateway.name}</option>)}
                 {draft.jumpProfileId && !jumpGateways(profiles, profile?.id).some(entry => entry.id === draft.jumpProfileId) && <option value={draft.jumpProfileId}>{t("jump.missing")}</option>}
               </select>
-              <span className="field__hint">{t("jump.settingHint")}</span>
+              <DesktopDescription><span className="field__hint">{t("jump.settingHint")}</span></DesktopDescription>
             </label>}
 
             <div className={relayEntry ? "field-grid field-grid--even" : "field"}>
@@ -533,7 +534,7 @@ export function ConnectionDrawer({
             </div>
 
             {!relayEntry && (
-              <div className="connection-addresses" role="group" aria-label={t("form.hostname")} aria-describedby={`${formId}-addresses-hint`}>
+              <div className="connection-addresses" role="group" aria-label={t("form.hostname")} aria-describedby={mobile ? undefined : `${formId}-addresses-hint`}>
                 <div className="connection-addresses__row">
                   <div className="field">
                     <label className="field__label" htmlFor={`${formId}-host`}>
@@ -612,7 +613,7 @@ export function ConnectionDrawer({
                     {additionalErrors.port && <p className="field__error">{t(additionalErrors.port.key, additionalErrors.port.values)}</p>}
                   </div>
                 </div>
-                <p id={`${formId}-addresses-hint`} className="field__hint connection-addresses__hint">{t("form.additionalHostnameHint")}</p>
+                <DesktopDescription><p id={`${formId}-addresses-hint`} className="field__hint connection-addresses__hint">{t("form.additionalHostnameHint")}</p></DesktopDescription>
               </div>
             )}
 
@@ -644,7 +645,7 @@ export function ConnectionDrawer({
                     {error("hostname")}
                   </p>
                 ) : (
-                  <p className="field__hint">{t("remote.host.relayHint")}</p>
+                  <DesktopDescription><p className="field__hint">{t("remote.host.relayHint")}</p></DesktopDescription>
                 )}
               </div>
             )}
@@ -679,14 +680,14 @@ export function ConnectionDrawer({
             )}
 
             {draft.protocol === "lattice" && !relayEntry && (
-              <Callout tone="info" title={t("form.remoteDirect.title")}>
+              <DesktopDescription><Callout tone="info" title={t("form.remoteDirect.title")}>
                 {t("form.remoteDirect.body")}
-              </Callout>
+              </Callout></DesktopDescription>
             )}
 
-            <p className="connection-form__credential-note">
+            <DesktopDescription><p className="connection-form__credential-note">
               {t("form.credentialsHint")}
-            </p>
+            </p></DesktopDescription>
 
             {supportsCredentialRecord(candidate) && (
               <div className="field">
@@ -723,7 +724,7 @@ export function ConnectionDrawer({
                   {t("form.credential.mcpRead")}
                 </label>
                 <p className="connection-form__credential-note">{t("form.credential.mcpWarning")}</p>
-                {draft.protocol === "rdp" && <p className="connection-form__credential-note">{t("form.credential.rdpHint")}</p>}
+                {draft.protocol === "rdp" && <DesktopDescription><p className="connection-form__credential-note">{t("form.credential.rdpHint")}</p></DesktopDescription>}
                 {credential.error && <Callout tone="warn" title={t("form.credential.error")}>{credential.error}</Callout>}
               </div>
             )}
@@ -749,7 +750,7 @@ export function ConnectionDrawer({
             <summary className="connection-advanced__summary">
               <span>
                 <strong>{t("form.advanced")}</strong>
-                <small>{t("form.advancedHint")}</small>
+                <DesktopDescription><small>{t("form.advancedHint")}</small></DesktopDescription>
               </span>
             </summary>
             <div className="connection-advanced__body">
@@ -839,9 +840,9 @@ export function ConnectionDrawer({
                 <div className="field">
                   <label className="field__label" htmlFor={`${formId}-tags`}>
                     {t("form.tags")}
-                    <span className="field__optional">
+                    <DesktopDescription><span className="field__optional">
                       {t("form.tagsHint")}
-                    </span>
+                    </span></DesktopDescription>
                   </label>
                   <input
                     id={`${formId}-tags`}
@@ -984,6 +985,6 @@ export function ConnectionDrawer({
           </div>
         )}
       </div>
-    </div>
+    </div></MobilePresentationProvider>
   );
 }

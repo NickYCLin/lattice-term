@@ -1,3 +1,4 @@
+import { DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import { preserveTerminalButtonFocus } from "../terminal/terminalPointerFocus";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
@@ -110,6 +111,7 @@ function RemoteCliTerminal({ connection, selected, theme, refreshRevision }: { c
   const { t } = useI18n();
   const [problem, setProblem] = useState(false);
   const [ready, setReady] = useState(false);
+  const mobile = useMobilePresentation();
   const [truncated, setTruncated] = useState(false);
   const terminal = useRef<Terminal | null>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -210,9 +212,9 @@ function RemoteCliTerminal({ connection, selected, theme, refreshRevision }: { c
     <div className="remote-cli-heading"><strong>{card.title}</strong>{card.detail && <small>{card.detail}</small>}
       {(selected.directory || selected.project) && <small className="remote-cli-heading__path" title={displayPath(selected.directory || selected.project || "")}>{t("remote.cli.folder", { path: displayPath(selected.directory || selected.project || "") })}</small>}
     </div>
-    <p className="muted" role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>
-    {truncated && <p className="muted">{t("remote.cli.truncated")}</p>}
-    {image && <p className={image.state === "failed" || image.state === "unreadable" ? "remote-cli-image remote-cli-image--problem" : "remote-cli-image muted"} role={image.state === "failed" || image.state === "unreadable" ? "alert" : "status"}>{
+    {(!mobile || problem || !ready) && <p className="muted" role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>}
+    {truncated && <DesktopDescription><p className="muted">{t("remote.cli.truncated")}</p></DesktopDescription>}
+    {image && (!mobile || image.state !== "sent") && <p className={image.state === "failed" || image.state === "unreadable" ? "remote-cli-image remote-cli-image--problem" : "remote-cli-image muted"} role={image.state === "failed" || image.state === "unreadable" ? "alert" : "status"}>{
       image.state === "uploading" ? t("remote.cli.imageUploading", { percent: String(image.percent) })
         : image.state === "sent" ? t("remote.cli.imageSent")
         : image.state === "unreadable" ? t("remote.chat.imageUnreadable") : t("remote.cli.imageFailed")

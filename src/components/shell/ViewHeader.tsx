@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 /** Header for the workspace column: area name, context and area actions. */
 
 import type { ReactNode } from "react";
@@ -45,7 +46,7 @@ export function ViewHeader({
 
       <div className="view-header__text">
         <h1 className="view-header__title">{title}</h1>
-        <p className="view-header__description">{description}</p>
+        <DesktopDescription><p className="view-header__description">{description}</p></DesktopDescription>
       </div>
 
       {actions && <div className="view-header__actions">{actions}</div>}

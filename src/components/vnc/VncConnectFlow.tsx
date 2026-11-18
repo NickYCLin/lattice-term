@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { jumpError } from "../../app/jumpRoutes";
 import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { useEffect, useRef, useState } from "react";
@@ -231,7 +232,7 @@ export function VncConnectFlow({
                 disabled={busy}
                 onChange={(event) => setPassword(event.currentTarget.value)}
               />
-              <p className="field__optional">{t("vnc.connect.passwordHint")}</p>
+              <DesktopDescription><p className="field__optional">{t("vnc.connect.passwordHint")}</p></DesktopDescription>
             </div>
           )}
 

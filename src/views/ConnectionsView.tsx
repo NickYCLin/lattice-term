@@ -1,3 +1,4 @@
+import { MobilePresentationProvider } from "../components/common/MobilePresentation";
 import { JumpMigrationDialog } from "../components/connections/JumpMigrationDialog";
 import { legacyJumpCandidates } from "../app/jumpRoutes";
 import { FileDropZone } from "../components/files/FileDropZone";
@@ -275,7 +276,7 @@ export function ConnectionsView({
 
   if (profiles.length === 0 && databases.profiles.length === 0 && !databases.loading) {
     return (
-      <div className="connections connections--empty">
+      <MobilePresentationProvider mobile={mobile}><div className="connections connections--empty">
         {importPreview}
         {databaseManager}
         {filePicker}
@@ -323,12 +324,12 @@ export function ConnectionsView({
           }
           footnote={t("connections.empty.footnote")}
         />
-      </div>
+      </div></MobilePresentationProvider>
     );
   }
 
   return (
-    <div className="connections">
+    <MobilePresentationProvider mobile={mobile}><div className="connections">
       {importPreview}
       {(legacyJumpCandidates(profiles).length > 0 || profiles.some(profile => profile.retiredTo)) && <button type="button" className="button button--secondary" onClick={() => setJumpMigrationOpen(true)}>{t("jump.migration.title")}</button>}
       {jumpMigrationOpen && <JumpMigrationDialog profiles={profiles} onMerge={workspace.migrateJumpProfile} onClose={() => setJumpMigrationOpen(false)} />}
@@ -508,6 +509,6 @@ export function ConnectionsView({
             ))
         )}
       </div>
-    </div>
+    </div></MobilePresentationProvider>
   );
 }

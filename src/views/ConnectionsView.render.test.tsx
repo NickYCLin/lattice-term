@@ -141,3 +141,12 @@ it("waits for native database metadata before declaring the entire workspace emp
   expect(markup).toContain("SQL 工作台</button>");
   expect(markup).not.toContain("還沒有任何連線");
 });
+
+it("keeps the mobile empty-state title/actions without explanatory body or footnote", () => {
+  const mobile = render([], { mobile: true, backendAvailable: false }), desktop = render([], { backendAvailable: false });
+  expect(mobile).not.toContain('class="empty-state__text"');
+  expect(mobile).not.toContain('class="empty-state__footnote"');
+  expect(desktop).toContain('class="empty-state__text"');
+  expect(desktop).toContain('class="empty-state__footnote"');
+  expect(mobile).toContain('class="empty-state__title"'); expect(mobile).toContain("新增連線"); expect(mobile).toContain("匯入檔案");
+});

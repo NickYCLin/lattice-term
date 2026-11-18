@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 /**
  * Details for the selected connection, in two tabs.
  *
@@ -234,7 +235,7 @@ export function ConnectionInspector({
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-faint">{t("inspector.machine.hint")}</p>
+                  <DesktopDescription><p className="text-faint">{t("inspector.machine.hint")}</p></DesktopDescription>
                 )}
                 {machine.candidates.length > 0 && (
                   <div className="inspector__machine-link">
@@ -304,9 +305,9 @@ export function ConnectionInspector({
               </ul>
             </section>
 
-            <Callout tone="security" title={t("inspector.security.title")}>
+            <DesktopDescription><Callout tone="security" title={t("inspector.security.title")}>
               {t("inspector.security.body")}
-            </Callout>
+            </Callout></DesktopDescription>
           </>
         ) : (
           <HostMetricsPanel state={metrics} />

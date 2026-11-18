@@ -1,3 +1,4 @@
+import { MobilePresentationProvider, DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { normalizeViewerPairingToken } from "../../app/pairingToken";
@@ -49,6 +50,7 @@ export function RemoteConnectFlow({
   onCancel: () => void;
 }) {
   const { t } = useI18n();
+  const mobile = useMobilePresentation() || platform === "ios" || platform === "android";
   const relay = isRelayProfile(profile);
   const savedCredential = useSavedCredential(profile.id, "latticePairingCode");
   const vaultUnavailable = vault?.backend === "vault" && vault.status !== null && vault.status.state !== "unlocked";
@@ -246,7 +248,7 @@ export function RemoteConnectFlow({
   }
 
   return (
-    <div
+    <MobilePresentationProvider platform={platform}><div
       className="scrim scrim--center"
       role="presentation"
       onMouseDown={busy ? undefined : onCancel}
@@ -281,9 +283,9 @@ export function RemoteConnectFlow({
 
         <form className="dialog__stack" onSubmit={submit}>
           <p className="dialog__body mono">{connectionTarget(profile)}</p>
-          <Callout tone="security" title={t("remote.connect.securityTitle")}>
+          <DesktopDescription platform={platform}><Callout tone="security" title={t("remote.connect.securityTitle")}>
             {t("remote.connect.securityBody")}
-          </Callout>
+          </Callout></DesktopDescription>
           {problem && (
             <Callout tone="warn" title={t("remote.connect.failedTitle")}>
               {problem}
@@ -326,7 +328,7 @@ export function RemoteConnectFlow({
 
           {relay && platform === "ios" && vault?.backend === "vault" && (
             <Callout tone="info" title={t("remote.connect.deviceStorageTitle")}>
-              <p>{t("remote.connect.deviceStorageBody")}</p>
+              <DesktopDescription platform={platform}><p>{t("remote.connect.deviceStorageBody")}</p></DesktopDescription>
               {vault.problem && <p role="alert">{vault.problem}</p>}
               <button type="button" className="button button--secondary" disabled={busy || vault.busy}
                 onClick={() => void useDeviceStorage()}>
@@ -371,7 +373,7 @@ export function RemoteConnectFlow({
                 spellCheck={false}
                 onChange={(event) => setRelayAddress(event.currentTarget.value)}
               />
-              <p className="field__optional">{t("remote.host.relayHint")}</p>
+              <DesktopDescription platform={platform}><p className="field__optional">{t("remote.host.relayHint")}</p></DesktopDescription>
             </div>
           )}
 
@@ -384,7 +386,7 @@ export function RemoteConnectFlow({
                 <ShieldIcon size={16} />
                 <input
                   id="remote-pairing-code" {...plainTextInputProps}
-                  aria-describedby="remote-pairing-code-hint"
+                  aria-describedby={mobile ? undefined : "remote-pairing-code-hint"}
                   ref={codeRef}
                   className="input mono"
                   value={pairingCode}
@@ -398,7 +400,7 @@ export function RemoteConnectFlow({
                   }
                 />
               </div>
-              <p id="remote-pairing-code-hint" className="field__optional">{t(relay ? "remote.connect.relayCodeHint" : "remote.connect.codeHint")}</p>
+              <DesktopDescription platform={platform}><p id="remote-pairing-code-hint" className="field__optional">{t(relay ? "remote.connect.relayCodeHint" : "remote.connect.codeHint")}</p></DesktopDescription>
             </div>
           )}
 
@@ -439,6 +441,6 @@ export function RemoteConnectFlow({
           </div>
         </form>
       </div>
-    </div>
+    </div></MobilePresentationProvider>
   );
 }

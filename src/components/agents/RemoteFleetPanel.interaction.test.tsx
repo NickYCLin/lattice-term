@@ -58,15 +58,17 @@ it("shows only connected Lattice Remote Fleet targets on mobile", async () => {
   try {
     expect(allNodes(host).filter(node => node.tagName === "OPTION").map(node => node.textContent)).toEqual(["beta"]);
     expect(fleet.listFleetSessions).toHaveBeenCalledWith("beta");
-    expect(host.textContent).toContain("手機不執行本機 Agent");
+    expect(host.textContent).not.toContain("手機不執行本機 Agent");
+    expect(host.textContent).toContain("重新整理");
   } finally { await unmount(); }
 });
 
-it("explains how to connect when no mobile Fleet host is available", async () => {
+it("retains the mobile Fleet empty-state title without setup instructions", async () => {
   vi.mocked(fleet.listFleetTargets).mockResolvedValue([{ ...targets[0], backend: "ssh" }]);
   const { host, unmount } = await mount(true);
   try {
-    expect(host.textContent).toContain("請先在遠端主機啟用 Fleet 分享");
+    expect(host.textContent).toContain("尚無分享 Fleet 的連線。");
+    expect(host.textContent).not.toContain("請先在遠端主機啟用 Fleet 分享");
     expect(fleet.listFleetSessions).not.toHaveBeenCalled();
   } finally { await unmount(); }
 });

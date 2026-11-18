@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { plainTextInputProps } from "../../app/plainTextInput";
 import { useState } from "react";
 import { useI18n } from "../../i18n/context";
@@ -69,7 +70,7 @@ export function RelayAddressField({
         placeholder={t("remote.host.relayPlaceholder")}
         onChange={(event) => onChange(event.currentTarget.value)}
       />
-      <small className="field__optional">{hint}</small>
+      <DesktopDescription><small className="field__optional">{hint}</small></DesktopDescription>
     </div>
   );
 }

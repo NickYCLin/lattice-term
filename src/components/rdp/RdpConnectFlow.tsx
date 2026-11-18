@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { jumpError } from "../../app/jumpRoutes";
 import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { useEffect, useRef, useState } from "react";
@@ -168,9 +169,9 @@ export function RdpConnectFlow({
 
         <form className="dialog__stack" onSubmit={submit}>
           <p className="dialog__body mono">{connectionTarget(profile)}</p>
-          <Callout tone="security" title={t("rdp.connect.securityTitle")}>
+          <DesktopDescription><Callout tone="security" title={t("rdp.connect.securityTitle")}>
             {t("rdp.connect.securityBody")}
-          </Callout>
+          </Callout></DesktopDescription>
           {problem && (
             <Callout tone="warn" title={t("rdp.connect.failedTitle")}>
               {problem}

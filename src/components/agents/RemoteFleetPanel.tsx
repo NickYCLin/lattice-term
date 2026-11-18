@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   appendBounded,
@@ -164,7 +165,7 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
         <div>
           <span className="eyebrow">{t("agents.remoteFleet.eyebrow")}</span>
           <h3>{t("agents.remoteFleet.title")}</h3>
-          <p>{t(mobile ? "agents.remoteFleet.mobileBody" : "agents.remoteFleet.body")}</p>
+          {!mobile && <DesktopDescription><p>{t("agents.remoteFleet.body")}</p></DesktopDescription>}
         </div>
         <button type="button" className="button button--ghost button--sm" onClick={() => {
           void loadTargets();

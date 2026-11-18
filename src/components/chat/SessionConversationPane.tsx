@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { NativeRecordView, NativeHistoryAccess } from "./NativeRecordView";
 import { presentAgentSessionGroup } from "../../app/agentSessionPresentation";
 import { ApprovalActions } from "./ApprovalActions";
@@ -380,7 +381,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
               </code>
               <span className="chat-card__state">{t("chat.approval.title")}</span>
             </div>
-            <p className="chat-notice">{t("sessionChat.permission.hint")}</p>
+            <DesktopDescription><p className="chat-notice">{t("sessionChat.permission.hint")}</p></DesktopDescription>
             <div className="chat-card__actions">
               <ApprovalActions canAllowSession={conversation.approval.canAllowSession} disabled={conversation.answering}
                 unsupportedReason={t("sessionChat.permission.sessionUnsupported")}

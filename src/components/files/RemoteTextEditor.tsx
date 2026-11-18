@@ -1,3 +1,4 @@
+import { DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
@@ -30,6 +31,7 @@ export function RemoteTextEditor(props: RemoteTextEditorProps) {
 
 function RemoteTextEditorSession({ path, read, save, onClose }: RemoteTextEditorProps) {
   const { t, tag } = useI18n();
+  const mobile = useMobilePresentation();
   const titleId = useId();
   const hintId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -243,7 +245,7 @@ function RemoteTextEditorSession({ path, read, save, onClose }: RemoteTextEditor
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
-          aria-describedby={hintId}
+          aria-describedby={mobile ? undefined : hintId}
           aria-busy={busy !== null || undefined}
           tabIndex={-1}
           onMouseDown={(event) => event.stopPropagation()}
@@ -270,8 +272,8 @@ function RemoteTextEditorSession({ path, read, save, onClose }: RemoteTextEditor
               onClick={requestClose}
             ><CloseIcon size={18} /></button>
           </header>
-          <p id={hintId} className="remote-text-editor__hint">{t("fileEditor.hint")}</p>
-          <p className="remote-text-editor__hint">{t("fileEditor.backupNotice")}</p>
+          <DesktopDescription><p id={hintId} className="remote-text-editor__hint">{t("fileEditor.hint")}</p></DesktopDescription>
+          <DesktopDescription><p className="remote-text-editor__hint">{t("fileEditor.backupNotice")}</p></DesktopDescription>
           {closeNotice && <div className="remote-text-editor__notice" role="alert">
             <span>{t(`fileEditor.windowClose.${closeNotice.kind}`)}</span>
             {closeNotice.detail !== undefined && <span>{describeError(closeNotice.detail)}</span>}

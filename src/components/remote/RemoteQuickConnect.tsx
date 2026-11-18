@@ -1,3 +1,4 @@
+import { DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { normalizeViewerPairingToken } from "../../app/pairingToken";
@@ -44,6 +45,7 @@ export function RemoteQuickConnect({
   profiles?: ReadonlyArray<Pick<ConnectionProfile, "relayAddress">>;
 }) {
   const { t } = useI18n();
+  const mobile = useMobilePresentation();
   const [savedRelay] = useState(() => inferRelayAddress(window.localStorage, profiles));
   const [relayAddress, setRelayAddress] = useState(savedRelay);
   const [deviceId, setDeviceId] = useState("");
@@ -179,9 +181,9 @@ export function RemoteQuickConnect({
         </header>
 
         <form className="dialog__stack" onSubmit={submit}>
-          <Callout tone="security" title={t("remote.quick.securityTitle")}>
+          <DesktopDescription><Callout tone="security" title={t("remote.quick.securityTitle")}>
             {t("remote.quick.securityBody")}
-          </Callout>
+          </Callout></DesktopDescription>
           {problem && (
             <Callout tone="warn" title={t("remote.connect.failedTitle")}>
               {problem}
@@ -207,7 +209,7 @@ export function RemoteQuickConnect({
                 )
               }
             />
-            <p className="field__optional">{t("remote.quick.deviceIdHint")}</p>
+            <DesktopDescription><p className="field__optional">{t("remote.quick.deviceIdHint")}</p></DesktopDescription>
           </div>
 
           <div className="field">
@@ -218,7 +220,7 @@ export function RemoteQuickConnect({
               <ShieldIcon size={16} />
               <input
                 id="remote-quick-code"
-                aria-describedby="remote-quick-code-hint"
+                aria-describedby={mobile ? undefined : "remote-quick-code-hint"}
                 className="input mono"
                 value={pairingCode}
                 type="password"
@@ -230,7 +232,7 @@ export function RemoteQuickConnect({
                 }
               />
             </div>
-            <p id="remote-quick-code-hint" className="field__optional">{t("remote.connect.relayCodeHint")}</p>
+            <DesktopDescription><p id="remote-quick-code-hint" className="field__optional">{t("remote.connect.relayCodeHint")}</p></DesktopDescription>
           </div>
 
           <RelayAddressField

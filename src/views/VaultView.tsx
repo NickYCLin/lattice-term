@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../components/common/MobilePresentation";
 /**
  * Key Vault view.
  *
@@ -630,7 +631,7 @@ export function VaultView({
                 provider: credentials.state.provider,
               })}
             >
-              {t("vault.credentials.ready.body")}
+              <DesktopDescription>{t("vault.credentials.ready.body")}</DesktopDescription>
             </Callout>
           )}
 
@@ -818,9 +819,9 @@ export function VaultView({
                     autoCorrect="off"
                     spellCheck={false}
                   />
-                  <span className="field__hint">
+                  <DesktopDescription><span className="field__hint">
                     {t("vault.form.fingerprintHint")}
-                  </span>
+                  </span></DesktopDescription>
                 </div>
               </div>
 

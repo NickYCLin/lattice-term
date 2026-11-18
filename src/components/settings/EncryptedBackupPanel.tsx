@@ -1,3 +1,4 @@
+import { DesktopDescription } from "../common/MobilePresentation";
 import { FileDropZone } from "../files/FileDropZone";
 import { readSelectedText, localFileError, type UploadFile } from "../../app/localFiles";
 import { useRef, useState } from "react";
@@ -120,9 +121,9 @@ export function EncryptedBackupPanel({
       <div className="setting">
         <div className="setting__text">
           <strong className="setting__title">{t("settings.security.backup")}</strong>
-          <p className="setting__description">
+          <DesktopDescription><p className="setting__description">
             {t("settings.security.backupDetail")}
-          </p>
+          </p></DesktopDescription>
         </div>
       </div>
 
@@ -132,9 +133,9 @@ export function EncryptedBackupPanel({
         </Callout>
       )}
 
-      <Callout tone="security" title={t("settings.backup.scope.title")}>
+      <DesktopDescription><Callout tone="security" title={t("settings.backup.scope.title")}>
         {t("settings.backup.scope.body")}
-      </Callout>
+      </Callout></DesktopDescription>
 
       {vaultUnlocked && (
         <Callout tone="warn" title={t("settings.backup.vaultUnlocked.title")}>
@@ -158,9 +159,9 @@ export function EncryptedBackupPanel({
       <div className="setting">
         <div className="setting__text">
           <strong className="setting__title">{t("settings.backup.export.title")}</strong>
-          <p className="setting__description">
+          <DesktopDescription><p className="setting__description">
             {t("settings.backup.export.body")}
-          </p>
+          </p></DesktopDescription>
         </div>
         <div className="dialog__stack">
           <label className="field">
@@ -209,9 +210,9 @@ export function EncryptedBackupPanel({
       <div className="setting">
         <div className="setting__text">
           <strong className="setting__title">{t("settings.backup.restore.title")}</strong>
-          <p className="setting__description">
+          <DesktopDescription><p className="setting__description">
             {t("settings.backup.restore.body")}
-          </p>
+          </p></DesktopDescription>
         </div>
         <div className="dialog__stack">
           <div className="field">

@@ -1,3 +1,4 @@
+import { DesktopDescription, useMobilePresentation } from "../common/MobilePresentation";
 import type { Preferences } from "../../app/preferences";
 import { DEFAULT_INTERFACE_SCALE, DEFAULT_OUTPUT_FONT_SIZE } from "../../app/typography";
 import { useI18n } from "../../i18n/context";
@@ -7,16 +8,17 @@ export function TypographySettings({ preferences, onChange }: {
   onChange: (patch: Partial<Preferences>) => void;
 }) {
   const { t } = useI18n();
+  const mobile = useMobilePresentation();
   return (
     <div className="typography-settings">
       <div className="setting">
         <div className="setting__text">
           <label className="setting__title" htmlFor="interface-text-scale">{t("settings.interfaceScale")}</label>
-          <p className="setting__description" id="interface-text-scale-hint">{t("settings.interfaceScaleHint")}</p>
+          <DesktopDescription><p className="setting__description" id="interface-text-scale-hint">{t("settings.interfaceScaleHint")}</p></DesktopDescription>
         </div>
         <div className="typography-settings__control">
           <input id="interface-text-scale" type="range" min={100} max={200} step={10}
-            aria-describedby="interface-text-scale-hint" aria-valuetext={`${preferences.interfaceScale}%`}
+            aria-describedby={mobile ? undefined : "interface-text-scale-hint"} aria-valuetext={`${preferences.interfaceScale}%`}
             value={preferences.interfaceScale} onChange={event => onChange({ interfaceScale: Number(event.target.value) })} />
           <output htmlFor="interface-text-scale">{preferences.interfaceScale}%</output>
         </div>
@@ -24,11 +26,11 @@ export function TypographySettings({ preferences, onChange }: {
       <div className="setting">
         <div className="setting__text">
           <label className="setting__title" htmlFor="output-font-size">{t("settings.outputFontSize")}</label>
-          <p className="setting__description" id="output-font-size-hint">{t("settings.outputFontSizeHint")}</p>
+          <DesktopDescription><p className="setting__description" id="output-font-size-hint">{t("settings.outputFontSizeHint")}</p></DesktopDescription>
         </div>
         <div className="typography-settings__control">
           <input id="output-font-size" type="range" min={12} max={32} step={1}
-            aria-describedby="output-font-size-hint" aria-valuetext={`${preferences.outputFontSize} px`}
+            aria-describedby={mobile ? undefined : "output-font-size-hint"} aria-valuetext={`${preferences.outputFontSize} px`}
             value={preferences.outputFontSize} onChange={event => onChange({ outputFontSize: Number(event.target.value) })} />
           <output htmlFor="output-font-size">{preferences.outputFontSize} px</output>
         </div>

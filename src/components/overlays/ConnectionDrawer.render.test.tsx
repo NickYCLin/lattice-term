@@ -190,3 +190,14 @@ it.each([
   expect(body).toBeLessThan(foot);
   expect(markup).toMatch(/type="submit"[^>]*form="[^"]+"/);
 });
+
+it("omits explanatory form nodes on mobile and retains labels, optional annotations and actions", () => {
+  const mobile = renderDrawer(null, { mobile: true }), desktop = renderDrawer();
+  for (const cls of ["form-section__hint", "connection-addresses__hint"]) {
+    expect(mobile).not.toContain('class="' + cls + '"');
+  }
+  expect(mobile).not.toContain("-addresses-hint");
+  expect(desktop).toContain("connection-addresses__hint");
+  for (const text of ["主機位址", "使用者名稱", "選填", "儲存並連線", "取消"]) expect(mobile).toContain(text);
+  expect(mobile).toContain('placeholder=');
+});
