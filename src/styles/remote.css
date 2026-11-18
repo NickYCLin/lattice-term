@@ -27,9 +27,10 @@
 }
 
 .remote-code-field {
-  position: relative;
   display: flex;
   align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 /* Terminal-mode session: the shell fills the space the canvas would take. */
@@ -40,23 +41,18 @@
 }
 
 .remote-code-field > svg {
-  position: absolute;
-  left: var(--control-leading-icon-inset);
-  top: 50%;
+  flex: none;
   width: var(--control-leading-icon-size);
   height: var(--control-leading-icon-size);
-  transform: translateY(-50%);
-  z-index: 1;
   color: var(--ok);
   pointer-events: none;
 }
 
 .remote-code-field .input {
-  padding-inline-start: calc(
-    var(--control-leading-icon-inset)
-    + var(--control-leading-icon-size)
-    + var(--control-leading-icon-gap)
-  );
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  max-width: 100%;
   letter-spacing: 0.16em;
   font-size: var(--text-md);
 }

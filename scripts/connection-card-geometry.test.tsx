@@ -24,7 +24,7 @@ it.skipIf(!process.env.LATTICE_GEOMETRY_BROWSER)("keeps card geometry stable acr
     <ul class="connection-grid">${variants[0]}</ul><details id="group"><summary>合成群組</summary><div style="height:900px">其他連線</div></details></div>
     <pre id="evidence"></pre><script>
     const rect = element => { const bounds = element.getBoundingClientRect(); return {x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height}; };
-    const measure = () => ({card:rect(document.querySelector('.connection-card')),buttons:[...document.querySelectorAll('.connection-card__go')].map(rect),actions:rect(document.querySelector('.connection-card__actions')),overflow:document.querySelector('.connection-card').scrollWidth > document.querySelector('.connection-card').clientWidth});
+    const measure = () => ({card:rect(document.querySelector('.connection-card')),buttons:[...document.querySelectorAll('.connection-card__go')].map(rect),actions:rect(document.querySelector('.connection-card__primary')),overflow:document.querySelector('.connection-card').scrollWidth > document.querySelector('.connection-card').clientWidth});
     const results = [];
     for (const [variant, markup] of ${JSON.stringify(variants)}.entries()) {
     document.querySelector('.connection-grid').innerHTML = markup;
