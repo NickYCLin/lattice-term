@@ -4,6 +4,19 @@
 
 ---
 
+## [2026.11.19](https://github.com/NickYCLin/lattice-term/compare/v2026.11.18...v2026.11.19) (2026-11-18)
+
+
+### 🛠️ 問題修正
+
+* 修正配對碼輸入框與圖示間距 ([e655c60](https://github.com/NickYCLin/lattice-term/commit/e655c609fa022e99c79e6073ff504d5060c105bb))
+* 讓開啟鍵盤按鈕能叫出 iOS 軟體鍵盤並避免其他按鈕搶走焦點 ([8168ab5](https://github.com/NickYCLin/lattice-term/commit/8168ab5ceaf0a1fd7015936b7173539f24d2cc51))
+
+
+### 🧹 架構優化
+
+* 移除手機介面多餘的說明文字 ([b721898](https://github.com/NickYCLin/lattice-term/commit/b721898dff6153c3255513fbbd8b1f48535be340))
+
 ## [2026.11.18](https://github.com/NickYCLin/lattice-term/compare/v2026.11.17...v2026.11.18) (2026-11-17)
 
 
