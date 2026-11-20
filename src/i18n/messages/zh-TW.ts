@@ -6,6 +6,7 @@
  */
 
 export const zhTW = {
+  "disk.refreshFailed": "操作已完成，但用量更新失敗。請再按「檢查用量」重新整理。{error}",
   "disk.title": "儲存空間",
   "disk.scan": "檢查用量",
   "disk.busy": "處理中…",

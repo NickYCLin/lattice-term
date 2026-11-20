@@ -31,7 +31,14 @@ export function DiskSpacePanel() {
     setNotice("");
     try {
       if (command) await invoke(command, args);
-      if (command !== "disk_reveal_attachment") setUsage(await invoke<DiskUsage>("disk_usage"));
+      if (command === "disk_reveal_attachment") return;
+      try {
+        setUsage(await invoke<DiskUsage>("disk_usage"));
+      } catch (error) {
+        setUsage(undefined);
+        setNotice(command ? t("disk.refreshFailed", { error: String(error) }) : String(error));
+        return;
+      }
       if (command === "disk_clear_cache") setNotice(t("disk.cleared"));
     } catch (error) {
       setNotice(String(error));

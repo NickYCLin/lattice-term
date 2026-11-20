@@ -9,6 +9,7 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "disk.refreshFailed": "The operation completed. Check usage again to refresh the list. {error}",
   "disk.title": "Storage space",
   "disk.scan": "Check usage",
   "disk.busy": "Working…",
