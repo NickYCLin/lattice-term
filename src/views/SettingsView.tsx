@@ -30,6 +30,7 @@ import { canUseInAppUpdater } from "../app/platformCapabilities";
 import { APP_VERSION } from "../app/version";
 import type { EncryptedBackupRestore } from "../app/encryptedBackup";
 import { EncryptedBackupPanel } from "../components/settings/EncryptedBackupPanel";
+import { DiskSpacePanel } from "../components/settings/DiskSpacePanel";
 import { ChangelogPanel } from "../components/settings/ChangelogPanel";
 import { PrivacyNotice } from "../components/settings/PrivacyNotice";
 import { RemoteMcpPanel } from "../components/settings/RemoteMcpPanel";
@@ -424,6 +425,8 @@ export function SettingsView({
           )}
         </dl>
       </section>
+
+      {desktopBackendAvailable && summary?.platform === "windows" && <DiskSpacePanel />}
 
       <section className="panel glass glass--sheen">
         <header className="panel__head">

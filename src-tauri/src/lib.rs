@@ -26,6 +26,8 @@ pub mod credentials;
 pub mod database;
 mod desktop_autostart;
 pub mod desktop_notification;
+#[cfg(windows)]
+mod disk_space;
 pub mod domain;
 mod durable_file;
 pub mod file_exports;
@@ -6565,6 +6567,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(windows)]
+            disk_space::disk_usage,
+            #[cfg(windows)]
+            disk_space::disk_reveal_attachment,
+            #[cfg(windows)]
+            disk_space::disk_compress_history,
+            #[cfg(windows)]
+            disk_space::disk_clear_cache,
             project_directory_identities,
             herdr::herdr_agents,
             herdr::herdr_read,

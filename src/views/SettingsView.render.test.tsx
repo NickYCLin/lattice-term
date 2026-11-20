@@ -57,6 +57,11 @@ function renderSettings(platform: string, update: Partial<AppUpdater> = {}): str
 }
 
 describe("Settings updater platform boundary", () => {
+  it("offers an on-demand disk scan on Windows", () => {
+    expect(renderSettings("windows")).toContain(zhTW["disk.scan"]);
+    expect(renderSettings("linux")).not.toContain(zhTW["disk.scan"]);
+    expect(renderSettings("android")).not.toContain(zhTW["disk.scan"]);
+  });
   it("offers independent labelled text sizes, output preview and reset", () => {
     const markup = renderSettings("windows");
     expect(markup).toContain("介面字級");
