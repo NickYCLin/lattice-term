@@ -4,6 +4,21 @@
 
 ---
 
+## [2026.11.21](https://github.com/NickYCLin/lattice-term/compare/v2026.11.19...v2026.11.21) (2026-11-21)
+
+
+### 🚀 新增功能
+
+* 在 Windows 設定中管理本機儲存空間 ([349470c](https://github.com/NickYCLin/lattice-term/commit/349470c9264d15d2c2f4f0c0c5b733bb2e6d2135))
+
+
+### 🛠️ 問題修正
+
+* 用量更新失敗時清除過期的操作清單 ([50d28c2](https://github.com/NickYCLin/lattice-term/commit/50d28c2bd15002b173dd3da099cc33c5ab3f1032))
+* 補列已封存與未分日期存放的 Codex 紀錄 ([b2c3638](https://github.com/NickYCLin/lattice-term/commit/b2c36386bf16911732f7f8264e481e204f320ea7))
+* 避免自動送出 /exit 並讓結束的工作階段可接續 ([85ef317](https://github.com/NickYCLin/lattice-term/commit/85ef317de5a064fc7fc4555293d4eae6fabfd726))
+* 預設關閉 Codex 自動放手 ([834a6a9](https://github.com/NickYCLin/lattice-term/commit/834a6a989747fb174e30535de69295c811d73de6))
+
 ## [2026.11.19](https://github.com/NickYCLin/lattice-term/compare/v2026.11.18...v2026.11.19) (2026-11-18)
 
 
