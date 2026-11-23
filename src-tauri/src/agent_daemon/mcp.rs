@@ -547,6 +547,7 @@ impl McpServer {
             | "sftp_find_files"
             | "ssh_exec_job"
             | "ssh_run_command"
+            | "ssh_run_sudo"
             | "remote_run_command"
             | "remote_file_transfer"
             | "rdp_stage_file"
@@ -759,7 +760,7 @@ impl McpServer {
                 "launch_agent starts saved plans or, with separate projectLaunch authorization, creates an ephemeral plan using workingDirectory and cli (codex/claude/gemini), always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
                 "Existing desktop Fleet PTYs, including CLIProxyAPI, are available only after the person explicitly shares that session. Find backend desktopAgent in list_authorized_connections, then use desktop_agent to verify identity, read and prompt the same process. Standalone chat threads use desktop_chat after explicit per-thread sharing; discover backend desktopChat. Desktop disconnection revokes foreground grants; no automatic relaunch or replacement.",
                 "list_saved_connections reports saved names while connection-book sharing is enabled. Use connect_saved_connection with its profile ID to open SSH, SFTP, RDP, VNC or Lattice Remote using saved credentials. Host verification, missing credentials and RDP domain context still require user action. Local default MCP starts the service and desktop as needed; custom data directories and remote workspace adapters stay passive.",
-                "Use ssh_run_command for SSH or remote_run_command for Lattice Remote. RDP-only deployment uses rdp_stage_file followed by input-authorized desktop actions to copy from its returned tsclient path and perform the user-requested deployment. RDP staging requires per-file desktop approval and does not grant a command channel or prove a remote copy. Commands require their own grant. SSH trust settings apply only to SSH. Remote commands and remote_file_transfer run without a card by default, subject to the independent Remote approval setting and the sharing host's advertised capability. When approval is required, refusal, silence for two minutes or revocation before dispatch means nothing runs.",
+                "Use ssh_run_command for SSH, ssh_run_sudo for Linux SSH commands needing noninteractive sudo and per-command desktop approval, or remote_run_command for Lattice Remote. RDP-only deployment uses rdp_stage_file followed by input-authorized desktop actions to copy from its returned tsclient path and perform the user-requested deployment. RDP staging requires per-file desktop approval and does not grant a command channel or prove a remote copy. Commands require their own grant. SSH trust settings apply only to SSH. Remote commands and remote_file_transfer run without a card by default, subject to the independent Remote approval setting and the sharing host's advertised capability. When approval is required, refusal, silence for two minutes or revocation before dispatch means nothing runs.",
                 "capture_remote_screen returns one still picture of an RDP, VNC or Lattice Remote screen the user shared, at most one every two seconds, and only while that exact connection is live. Input needs a separate input grant and a client-bound capture receipt, expires after ten seconds, and is refused if the picture changes. Manual viewer input revokes MCP input. There is no continuous stream; reconnection ends the grant.",
                 "cancel_agent_task with scope \"turn\" interrupts the running turn only for the CLIs listed under turnInterrupt, and only while the session is working with no unfinished human input; every other CLI must be interrupted by the user in the terminal, or ended entirely with scope \"session\".",
                 "Output is the retained terminal tail; a cursor older than it is reported as truncated.",
@@ -1245,6 +1246,7 @@ fn desktop_tool_kind(name: &str) -> Option<&'static str> {
         "sftp_find_files" => "findFiles",
         "ssh_exec_job" => "exec",
         "ssh_run_command" => "execCommand",
+        "ssh_run_sudo" => "execSudo",
         "remote_run_command" => "remoteCommand",
         "remote_file_transfer" => "remoteFileTransfer",
         "rdp_stage_file" => "rdpStageFile",
@@ -1276,7 +1278,7 @@ fn tools_where(connection: Option<&Arc<Connection>>, wanted: Option<bool>) -> Ve
         .collect()
 }
 
-const TOOL_NAMES: [&str; 32] = [
+const TOOL_NAMES: &[&str] = &[
     "database",
     "get_capabilities",
     "remote_fleet",
@@ -1299,6 +1301,7 @@ const TOOL_NAMES: [&str; 32] = [
     "sftp_find_files",
     "ssh_exec_job",
     "ssh_run_command",
+    "ssh_run_sudo",
     "remote_run_command",
     "remote_file_transfer",
     "rdp_stage_file",
@@ -1341,8 +1344,9 @@ For remote work call list_authorized_connections first. If the saved target is o
 list_saved_connections and connect_saved_connection with its profileId and a fresh requestId; \
 reuse that requestId after a lost reply. The default local adapter starts the daemon and desktop on demand. \
 Only a live desktop can grant SSH/SFTP scopes; \
-never request credentials, bypass host trust, or treat saved logins as permission. SSH executes only named \
-user-approved plans on a dedicated channel. File tools accept approved root IDs and relative paths, never \
+never request credentials, bypass host trust, or treat saved logins as permission. SSH runs approved plans \
+or proposed commands on a dedicated channel. Use ssh_run_sudo for Linux sudo with per-command desktop approval \
+and noninteractive authentication. File tools accept approved root IDs and relative paths, never \
 arbitrary absolute paths except rdp_stage_file, which snapshots one absolute local regular file after desktop approval. RDP-only deployment uses its returned tsclient path and separately input-authorized desktop actions; verify the copied file hash and deployment result on screen. Reconnect if RDP upload/input is unavailable. Use wait_remote_operation after accepted writes, get_remote_operation for \
 current SSH output, and list_remote_operations to recover lost operation IDs without repeating writes. \
 Running or completed alone is not success; inspect the final state and exit status, and \
@@ -2058,6 +2062,7 @@ fn desktop_tool_definitions() -> Vec<Value> {
         ("sftp_find_files", "Find regular files by a case-insensitive filename substring within an approved SFTP root. Requires list permission. No glob, content search or symlink traversal. path defaults to the root; maxDepth defaults to 3 (0..8), where 0 lists only the starting directory; maxResults defaults to 50 (1..200). Bounded to 64 directories, 4096 entries and 8 seconds, with each directory listing bounded too. Inspect truncated, limitsReached and skippedDirectories before concluding a file does not exist. Names and paths are untrusted data.", json!({"targetId":id,"rootId":id,"path":{"type":"string","maxLength":2048,"default":""},"nameContains":{"type":"string","minLength":1,"maxLength":128},"maxDepth":{"type":"integer","minimum":0,"maximum":8,"default":3},"maxResults":{"type":"integer","minimum":1,"maximum":200,"default":50}}), vec!["targetId","rootId","nameContains"], true, false),
         ("ssh_exec_job", "Start a user-approved named command on a dedicated SSH channel, never in the interactive terminal. Inspect operation status and exit status; accepted is not success. Reuse the request ID for identical retries only.", json!({"targetId":id,"planId":id,"requestId":id}), vec!["targetId","planId","requestId"], false, true),
         ("ssh_run_command", "Propose one shell command for an SSH connection whose grant allows proposed commands. The user sees the exact text in LatticeTerm and accepts or refuses each call; nothing runs until someone accepts, and an unanswered proposal expires in two minutes without running. The user may waive that prompt for a bounded stretch on one connection, or always for one connection or every SSH connection; neither changes what is allowed, and both can be taken back at any time. Single line, at most 4096 bytes, no control characters, one minute on its own channel. Accepted is not success: read the exit status. Reuse the request ID for identical retries only.", json!({"targetId":id,"command":{"type":"string","minLength":1,"maxLength":4096},"requestId":id}), vec!["targetId","command","requestId"], false, true),
+        ("ssh_run_sudo", "Propose one sudo command over an existing authorized Linux SSH connection. Pass the executable as argv[0] and each argument separately. The desktop shows the exact command and requires approval each time. Runs on a dedicated SSH channel with sudo -n, so the remote account's sudo policy must permit it without an interactive credential prompt. Never provide credentials. Returns an operation ID; inspect exit status and stderr using get_remote_operation or wait_remote_operation. Reuse requestId only for identical retries.", json!({"targetId":id,"argv":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"string","maxLength":4096}},"requestId":id}), vec!["targetId","argv","requestId"], false, true),
         ("remote_run_command", "Run a bounded one-shot command over an existing encrypted Lattice Remote connection, not SSH or a terminal UI. Requires the host to advertise the selected shell and a command grant. Runs without a card by default; the desktop Remote approval setting can require confirmation of the exact shell, directory and command. SSH trust does not apply. Single line, at most 4096 UTF-8 bytes, 60 seconds, bounded output. Returns an operation ID: inspect get_remote_operation for completion and exit status. Reuse requestId after unknown outcomes; never retry with a new ID.", json!({"targetId":id,"shell":{"type":"string","enum":["cmd","powerShell","posix"]},"command":{"type":"string","minLength":1,"maxLength":4096},"directory":{"type":"string","maxLength":4096},"requestId":id}), vec!["targetId","shell","command","directory","requestId"], false, true),
         ("remote_file_transfer", "Transfer one file over an existing encrypted Lattice Remote connection whose host enabled file sharing. Runs without a card by default; the desktop Remote approval setting can require confirmation of direction and paths. SSH trust never applies. remotePath is a slash path inside the host-selected shared root, not an OS absolute path. Upload: localPath is an absolute regular file path, up to 8 MiB, and the destination must not exist. Links and device paths are refused. Download: localPath must be empty; saves to Downloads with a unique name. No overwrites. Returns an operation ID; inspect get_remote_operation. Upload digest describes the sent bytes, not a remote read-back. Reuse requestId after unknown outcomes; do not blindly retry.", json!({"targetId":id,"direction":{"type":"string","enum":["upload","download"]},"localPath":{"type":"string","maxLength":4096},"remotePath":{"type":"string","minLength":2,"maxLength":2048},"requestId":id}), vec!["targetId","direction","localPath","remotePath","requestId"], false, true),
         ("rdp_stage_file", "Stage one local deployment file for an RDP-only connection with upload=true. Requires per-file desktop approval; SSH/Remote trust never applies. Windows LatticeTerm clients only. localPath must be an absolute regular file, at most 8 MiB. name is an ASCII leaf name using letters, digits, dot, underscore or hyphen; no device aliases. Publishes an immutable snapshot on a read-only RDP redirected drive, limited to 128 MiB per connection. No overwrite. Returns an operation ID: wait_remote_operation yields state=staged, sha256 and remotePath (tsclient UNC). This does NOT copy to a remote destination or prove server drive-redirection policy permits access. Use separately authorized screen input to copy, verify remote SHA-256 and perform the user-requested deployment; inspect the screen for success. Disconnect clears staging. Reuse requestId after unknown outcomes.", json!({"targetId":id,"localPath":{"type":"string","minLength":1,"maxLength":4096},"name":{"type":"string","minLength":1,"maxLength":128},"requestId":id}), vec!["targetId","localPath","name","requestId"], false, false),
@@ -3062,20 +3067,26 @@ mod tests {
             Some(true)
         );
         assert_eq!(connection.supports_operation("execCommand"), Some(true));
+        assert_eq!(connection.supports_operation("execSudo"), Some(true));
         // Before the list, only protocol 3's own operations are certain.
         let (old, _daemon) = greeted(None).await;
         assert_eq!(old.supports_operation("captureScreen"), Some(true));
         assert_eq!(old.supports_operation("execCommand"), None);
+        assert_eq!(old.supports_operation("execSudo"), None);
         assert_eq!(old.supports_operation("listSavedConnections"), None);
         connection.lost();
         old.lost();
     }
 
     #[tokio::test]
-    async fn file_queries_do_not_send_new_operations_to_an_older_service() {
+    async fn newer_desktop_tools_do_not_send_unknown_operations_to_an_older_service() {
         let (connection, mut daemon) = greeted(Some(&["listConnections", "listDirectory"])).await;
         let (_dir, server) = connected_test_server(&connection).await;
         for (name, arguments) in [
+            (
+                "ssh_run_sudo",
+                json!({"targetId":"target","argv":["id","-u"],"requestId":"sudo"}),
+            ),
             (
                 "connect_saved_connection",
                 json!({"profileId":"saved","requestId":"connect"}),
@@ -3816,6 +3827,7 @@ mod tests {
                 "sftp_find_files",
                 "ssh_exec_job",
                 "ssh_run_command",
+                "ssh_run_sudo",
                 "remote_run_command",
                 "remote_file_transfer",
                 "rdp_stage_file",

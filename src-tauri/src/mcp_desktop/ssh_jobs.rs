@@ -1,6 +1,6 @@
 //! Noninteractive channels only: never paste shell commands into a user's PTY.
 
-use super::{cancelled, ExecPlan, ServiceError};
+use super::{cancelled, valid_command, ExecPlan, ServiceError};
 use crate::ssh::{ChannelCloseGuard, TrustingHandler};
 use russh::{client, ChannelMsg};
 use serde_json::{json, Value};
@@ -9,6 +9,29 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 const OUTPUT_LIMIT: usize = 32 * 1024;
+
+pub(super) fn sudo_command(argv: &[String]) -> Result<String, ServiceError> {
+    let program = argv.first().ok_or_else(ServiceError::invalid)?;
+    if program.trim().is_empty()
+        || program.starts_with('-')
+        || program.contains('=')
+        || argv.len() > 128
+        || argv.iter().map(String::len).sum::<usize>() > super::MAX_COMMAND_BYTES
+    {
+        return Err(ServiceError::invalid());
+    }
+    // SSH exec accepts a shell line. Quote each argument to preserve argv
+    // exactly and keep shell expansion outside the elevated execution.
+    let mut command = String::from("if [ \"$(uname -s)\" = Linux ]; then exec sudo -n --");
+    for arg in argv {
+        command.push_str(" '");
+        command.push_str(&arg.replace('\'', "'\\''"));
+        command.push('\'');
+    }
+    command.push_str("; else printf '%s\\n' 'SSH sudo requires a Linux host' >&2; exit 126; fi");
+    valid_command(&command)?;
+    Ok(command)
+}
 
 #[derive(Default)]
 struct Output {
@@ -155,6 +178,56 @@ fn signal_label(signal: &russh::Sig) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sudo_preserves_literal_arguments_and_rejects_invalid_input() {
+        let argv = ["printf", "%s", "a'b; $(echo unexpected)", ""].map(str::to_owned);
+        let command = sudo_command(&argv).unwrap();
+        assert!(command.contains("exec sudo -n -- 'printf' '%s' 'a'\\''b; $(echo unexpected)' '';"));
+        for program in ["", " ", "-S", "NAME=value", "echo\nid"] {
+            assert!(sudo_command(&[program.into()]).is_err());
+        }
+        assert!(sudo_command(&[]).is_err());
+        assert!(sudo_command(&["x".repeat(super::super::MAX_COMMAND_BYTES)]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sudo_shell_checks_the_host_and_preserves_argv() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::{fs, process::Command};
+
+        let directory = tempfile::tempdir().unwrap();
+        for (name, script) in [
+            ("uname", "#!/bin/sh\nprintf '%s\\n' \"$TEST_HOST_SYSTEM\"\n"),
+            ("sudo", "#!/bin/sh\nprintf '<%s>\\n' \"$@\"\n"),
+        ] {
+            let path = directory.path().join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let argv = ["id", "a'b; $(echo unexpected)", ""].map(str::to_owned);
+        let command = sudo_command(&argv).unwrap();
+        let run = |system| {
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&command)
+                .env("PATH", directory.path())
+                .env("TEST_HOST_SYSTEM", system)
+                .output()
+                .unwrap()
+        };
+        let linux = run("Linux");
+        assert!(linux.status.success());
+        assert_eq!(
+            linux.stdout,
+            b"<-n>\n<-->\n<id>\n<a'b; $(echo unexpected)>\n<>\n"
+        );
+        let other = run("FreeBSD");
+        assert_eq!(other.status.code(), Some(126));
+        assert!(other.stdout.is_empty());
+        assert_eq!(other.stderr, b"SSH sudo requires a Linux host\n");
+    }
 
     #[test]
     fn live_snapshots_hold_split_utf8_without_hiding_malformed_bytes() {

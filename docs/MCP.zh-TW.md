@@ -308,6 +308,12 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 受控制字元（避免在卡片上看不出換行後還接了什麼），逾時固定 60 秒。權限
 等同該 SSH 帳號，不是沙箱；同時最多 8 筆等待中的提案。
 
+需要在 Linux SSH 主機上以 sudo 執行單一指令時，使用 `ssh_run_sudo`。
+`argv` 的第一項是執行檔，後面各項是獨立參數，例如 `["id", "-u"]`。
+每次都要在桌面核准，即使該連線已開啟免問。核准後在獨立 SSH 通道執行
+`sudo -n`，是否允許由遠端帳號的 sudoers 規則決定。若需要密碼或互動驗證，
+從操作結果讀取退出碼與錯誤訊息。請勿把密碼放進指令或對話。
+
 核准卡片另外提供「允許並在一段時間內不再問」（預設 15 分鐘，後端上限
 120 分鐘）。這個免問期只屬於該筆授權、只存在記憶體，撤權、重連或關閉桌
 面就消失，設定頁會顯示剩餘時間並可立刻恢復每次詢問。
@@ -371,6 +377,7 @@ Git、記憶交接或日誌。舊背景服務會要求更新，不會降級繞�
 | `sftp_read_text` | 分頁讀 UTF-8 一般檔案，需 download 權限，不落地本機 |
 | `ssh_exec_job` | 獨立、非互動 SSH channel 的命名指令工作 |
 | `ssh_run_command` | 提出臨時指令，每次都要使用者在桌面看過原文並同意才執行 |
+| `ssh_run_sudo` | 提出 Linux SSH 的單筆 sudo 指令，由桌面逐筆核准 |
 | `remote_run_command` | 透過 Lattice Remote 加密通道執行單次命令，預設免逐筆確認，可在設定關閉 |
 | `remote_file_transfer` | Lattice Remote 單檔上傳／下載，沿用 Remote 確認設定，不覆寫同名檔 |
 | `rdp_stage_file` | Windows 客戶端的 RDP 部署暫存，需 upload scope 與逐檔桌面核准；提供唯讀 tsclient 路徑與 SHA-256，不代表已複製或部署到遠端，詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md) |

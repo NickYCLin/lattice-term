@@ -329,6 +329,11 @@ impl server::Handler for Handler {
                 session.data(channel, "工作進行中\n".as_bytes().to_vec())?;
                 session.extended_data(channel, 1, b"still running\n".to_vec())?;
             }
+            b"if [ \"$(uname -s)\" = Linux ]; then exec sudo -n -- 'id' '-u'; else printf '%s\\n' 'SSH sudo requires a Linux host' >&2; exit 126; fi" => {
+                session.extended_data(channel, 1, b"sudo: a password is required\n".to_vec())?;
+                session.exit_status_request(channel, 1)?;
+                session.close(channel)?;
+            }
             _ if data.starts_with(b"export LC_ALL=C;") => {}
             _ => {
                 session.channel_failure(channel)?;
@@ -1258,6 +1263,39 @@ async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
             .is_ok());
         assert_eq!(peer.execs.load(Ordering::Relaxed), 3);
 
+        // Global SSH trust does not waive approval for sudo.
+        service.set_trust_all_commands(true);
+        let sudo = DesktopOperation::ExecSudo {
+            target_id: grant.id.clone(),
+            argv: vec!["id".into(), "-u".into()],
+            request_id: "sudo1".into(),
+        };
+        let elevated = service.execute("client", sudo.clone()).await.unwrap();
+        let operation_id = elevated["operationId"].as_str().unwrap();
+        let pending = loop {
+            if let Some(command) = service
+                .pending_commands()
+                .into_iter()
+                .find(|command| command.operation_id == operation_id)
+            {
+                break command;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert!(pending.requires_each_approval);
+        assert!(pending.command.contains("sudo -n -- 'id' '-u'"));
+        assert!(service.pending_command_profile(operation_id).is_none());
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 3);
+        service.decide_command(operation_id, CommandDecision::Approve, 5);
+        let result = poll(&service, &grant.id, operation_id).await;
+        assert_eq!(result["exitStatus"], 1);
+        assert_eq!(result["stderr"], "sudo: a password is required\n");
+        assert!(service.quiet_windows().is_empty());
+        let replay = service.execute("client", sudo).await.unwrap();
+        assert_eq!(replay["operationId"], elevated["operationId"]);
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 4);
+        service.set_trust_all_commands(false);
+
         // Withdrawing the grant ends a proposal that is still on screen.
         let orphan = service.execute("client", propose("c3")).await.unwrap();
         waiting(&service).await;
@@ -1272,7 +1310,7 @@ async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
             )
             .await
             .is_err());
-        assert_eq!(peer.execs.load(Ordering::Relaxed), 3);
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 4);
         crate::ssh::disconnect(&ssh, &session_id).await.unwrap();
     })
     .await;

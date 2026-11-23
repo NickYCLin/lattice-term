@@ -347,6 +347,11 @@ pub enum DesktopOperation {
         command: String,
         request_id: String,
     },
+    ExecSudo {
+        target_id: String,
+        argv: Vec<String>,
+        request_id: String,
+    },
     RemoteCommand {
         target_id: String,
         shell: lattice_remote::command_protocol::CommandShell,
@@ -411,6 +416,7 @@ impl DesktopOperation {
         "findFiles",
         "exec",
         "execCommand",
+        "execSudo",
         "remoteCommand",
         "remoteFileTransfer",
         "rdpStageFile",
@@ -453,6 +459,7 @@ impl DesktopOperation {
             Self::FindFiles { .. } => "findFiles",
             Self::Exec { .. } => "exec",
             Self::ExecCommand { .. } => "execCommand",
+            Self::ExecSudo { .. } => "execSudo",
             Self::RemoteCommand { .. } => "remoteCommand",
             Self::RemoteFileTransfer { .. } => "remoteFileTransfer",
             Self::RdpStageFile { .. } => "rdpStageFile",
@@ -481,6 +488,7 @@ impl DesktopOperation {
             | Self::FindFiles { target_id, .. }
             | Self::Exec { target_id, .. }
             | Self::ExecCommand { target_id, .. }
+            | Self::ExecSudo { target_id, .. }
             | Self::RemoteCommand { target_id, .. }
             | Self::RemoteFileTransfer { target_id, .. }
             | Self::RdpStageFile { target_id, .. }
@@ -502,7 +510,7 @@ impl DesktopOperation {
             Self::ListDirectory { .. } | Self::FindFiles { .. } => Some(Scope::List),
             Self::ReadText { .. } => Some(Scope::Download),
             Self::Exec { .. } => Some(Scope::Exec),
-            Self::ExecCommand { .. } => Some(Scope::Command),
+            Self::ExecCommand { .. } | Self::ExecSudo { .. } => Some(Scope::Command),
             Self::RemoteCommand { .. } => Some(Scope::Command),
             Self::RdpStageFile { .. } => Some(Scope::Upload),
             Self::Transfer {
@@ -542,6 +550,7 @@ impl DesktopOperation {
             | Self::ConnectSaved { request_id, .. }
             | Self::Exec { request_id, .. }
             | Self::ExecCommand { request_id, .. }
+            | Self::ExecSudo { request_id, .. }
             | Self::RemoteCommand { request_id, .. }
             | Self::RemoteFileTransfer { request_id, .. }
             | Self::RdpStageFile { request_id, .. }
@@ -907,7 +916,7 @@ impl DesktopService {
         let state = self.state.lock().ok()?;
         let pending = state.approvals.get(operation_id)?;
         let grant = state.grants.get(&pending.target_id)?;
-        if grant.view.backend != Backend::Ssh {
+        if pending.requires_each_approval || grant.view.backend != Backend::Ssh {
             return None;
         }
         let profile = self.ssh_trust_key(&grant.session_id)?;
@@ -1772,6 +1781,7 @@ impl DesktopService {
             operation,
             DesktopOperation::Exec { .. }
                 | DesktopOperation::ExecCommand { .. }
+                | DesktopOperation::ExecSudo { .. }
                 | DesktopOperation::RemoteCommand { .. }
                 | DesktopOperation::RemoteFileTransfer { .. }
                 | DesktopOperation::RdpStageFile { .. }
@@ -1857,6 +1867,12 @@ impl DesktopService {
                     return Err(ServiceError::denied());
                 }
                 valid_command(command)?;
+            }
+            DesktopOperation::ExecSudo { argv, .. } => {
+                if grant.view.backend != Backend::Ssh {
+                    return Err(ServiceError::denied());
+                }
+                ssh_jobs::sudo_command(argv)?;
             }
             DesktopOperation::RemoteCommand {
                 command,
@@ -2122,14 +2138,22 @@ impl DesktopService {
                     )
                     .await
                 }
-                DesktopOperation::ExecCommand { command, .. } => {
+                DesktopOperation::ExecCommand { .. } | DesktopOperation::ExecSudo { .. } => {
                     let lease = lease.ok_or_else(ServiceError::invalid)?;
+                    let (command, force_approval) = match operation {
+                        DesktopOperation::ExecCommand { command, .. } => (command.clone(), false),
+                        DesktopOperation::ExecSudo { argv, .. } => {
+                            (ssh_jobs::sudo_command(argv)?, true)
+                        }
+                        _ => return Err(ServiceError::invalid()),
+                    };
                     // Ask first. A refused or unanswered proposal never opens
                     // a channel, so nothing reaches the host.
                     self.await_approval(
                         client,
                         grant,
-                        command,
+                        &command,
+                        force_approval,
                         &lease.id,
                         grant.revoked.subscribe(),
                         lease.cancel.subscribe(),
@@ -2142,7 +2166,7 @@ impl DesktopService {
                     let plan = ExecPlan {
                         id: "command".to_string(),
                         label: "command".to_string(),
-                        command: command.clone(),
+                        command,
                         timeout_ms: AD_HOC_TIMEOUT_MS,
                     };
                     ssh_jobs::execute(
@@ -2174,6 +2198,7 @@ impl DesktopService {
                         client,
                         grant,
                         &proposal,
+                        false,
                         &lease.id,
                         grant.revoked.subscribe(),
                         lease.cancel.subscribe(),
@@ -2213,6 +2238,7 @@ impl DesktopService {
                         client,
                         grant,
                         &proposal,
+                        false,
                         &lease.id,
                         grant.revoked.subscribe(),
                         lease.cancel.subscribe(),
@@ -2241,6 +2267,7 @@ impl DesktopService {
                         client,
                         grant,
                         &proposal,
+                        false,
                         &lease.id,
                         grant.revoked.subscribe(),
                         lease.cancel.subscribe(),
@@ -2312,6 +2339,7 @@ impl DesktopService {
             operation,
             DesktopOperation::Exec { .. }
                 | DesktopOperation::ExecCommand { .. }
+                | DesktopOperation::ExecSudo { .. }
                 | DesktopOperation::RemoteCommand { .. }
                 | DesktopOperation::RemoteFileTransfer { .. }
                 | DesktopOperation::RdpStageFile { .. }
@@ -2359,7 +2387,10 @@ impl DesktopService {
             let Some(pending) = state.approvals.get(operation_id) else {
                 return;
             };
-            if decision == CommandDecision::Approve && quiet_minutes > 0 {
+            if decision == CommandDecision::Approve
+                && quiet_minutes > 0
+                && !pending.requires_each_approval
+            {
                 let minutes = quiet_minutes.min(MAX_QUIET_MINUTES);
                 if let Some(grant) = state.grants.get(&pending.target_id) {
                     if let Ok(mut quiet) = grant.quiet_until.lock() {
@@ -2421,11 +2452,13 @@ impl DesktopService {
     ///
     /// Revocation, cancellation and silence all end the wait without running
     /// anything: only an explicit acceptance continues.
+    #[allow(clippy::too_many_arguments)]
     async fn await_approval(
         &self,
         client: &str,
         grant: &Grant,
         command: &str,
+        force_approval: bool,
         operation_id: &str,
         mut revoked: watch::Receiver<bool>,
         mut cancel: watch::Receiver<bool>,
@@ -2438,7 +2471,9 @@ impl DesktopService {
             .is_some_and(|until| until > Instant::now());
         // SSH trust must never silently authorize a different transport.
         // Remote has its own persisted switch; host grants remain mandatory.
-        if (grant.view.backend == Backend::Ssh && (quiet || self.command_trusted(grant)))
+        if (!force_approval
+            && grant.view.backend == Backend::Ssh
+            && (quiet || self.command_trusted(grant)))
             || (grant.view.backend == Backend::Remote
                 && self.allow_remote_operations.load(Ordering::Relaxed))
         {
@@ -2463,10 +2498,8 @@ impl DesktopService {
                     target_label: grant.view.label.clone(),
                     client: client.to_string(),
                     command: command.to_string(),
-                    requires_each_approval: matches!(
-                        grant.view.backend,
-                        Backend::Remote | Backend::Rdp
-                    ),
+                    requires_each_approval: force_approval
+                        || matches!(grant.view.backend, Backend::Remote | Backend::Rdp),
                     requested_at: Instant::now(),
                     decision: decision.0,
                 },
@@ -3276,11 +3309,26 @@ mod tests {
                 profile_id: "profile".into(),
                 request_id: "connect".into(),
             },
+            DesktopOperation::Fleet {
+                target_id: "t".into(),
+                action: FleetAction::ListSessions {},
+            },
             DesktopOperation::GetMetrics {
                 target_id: "t".into(),
             },
             DesktopOperation::CaptureScreen {
                 target_id: "t".into(),
+            },
+            DesktopOperation::ScreenInput {
+                target_id: "t".into(),
+                snapshot_id: "s".into(),
+                frame_id: 1,
+                action: ScreenAction::Click {
+                    x: 1,
+                    y: 1,
+                    button: 1,
+                },
+                request_id: "q".into(),
             },
             DesktopOperation::ListDirectory {
                 target_id: "t".into(),
@@ -3313,6 +3361,11 @@ mod tests {
                 command: "c".into(),
                 request_id: "q".into(),
             },
+            DesktopOperation::ExecSudo {
+                target_id: "t".into(),
+                argv: vec!["id".into()],
+                request_id: "q".into(),
+            },
             DesktopOperation::RemoteCommand {
                 target_id: "t".into(),
                 shell: lattice_remote::command_protocol::CommandShell::PowerShell,
@@ -3331,6 +3384,14 @@ mod tests {
                 target_id: "t".into(),
                 local_path: "file".into(),
                 name: "site.zip".into(),
+                request_id: "q".into(),
+            },
+            DesktopOperation::Transfer {
+                target_id: "t".into(),
+                root_id: "r".into(),
+                direction: TransferDirection::Upload,
+                local_path: "file".into(),
+                remote_path: "file".into(),
                 request_id: "q".into(),
             },
             DesktopOperation::Cancel {
@@ -3354,7 +3415,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 23);
+        assert_eq!(DesktopOperation::KINDS.len(), samples.len());
     }
 
     #[test]
@@ -3795,6 +3856,7 @@ mod tests {
                     "test",
                     &task_grant,
                     "stage site.zip",
+                    false,
                     "stage-op",
                     task_grant.revoked.subscribe(),
                     cancel.subscribe(),
