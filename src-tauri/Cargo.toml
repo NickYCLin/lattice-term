@@ -21,7 +21,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 rusqlite = { version = "0.32.1", default-features = false, features = ["modern_sqlite"] }
-md-5 = "0.10"
+md-5 = "0.11"
 regex = "1"
 zstd = "0.13"
 tauri = { version = "2", features = [] }
