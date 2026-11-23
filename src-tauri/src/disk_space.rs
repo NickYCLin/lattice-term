@@ -78,7 +78,8 @@ fn transcript(path: &Path) -> bool {
         return false;
     };
     match parts.as_slice() {
-        ["codex", _, "sessions", _, _, _, name] => {
+        ["codex", _, "sessions", _, _, _, name]
+        | ["codex", _, "sessions" | "archived_sessions", name] => {
             name.starts_with("rollout-") && name.ends_with(".jsonl")
         }
         ["claude", _, "projects", _, name] => name.ends_with(".jsonl"),
@@ -400,6 +401,15 @@ mod tests {
             "codex/id/sessions/2026/01/01/rollout-old.jsonl"
         )));
         assert!(!transcript(Path::new("codex/id/.tmp/rollout-old.jsonl")));
+        assert!(transcript(Path::new(
+            "codex/id/sessions/rollout-flat.jsonl"
+        )));
+        assert!(transcript(Path::new(
+            "codex/id/archived_sessions/rollout-old.jsonl"
+        )));
+        assert!(!transcript(Path::new(
+            "codex/id/archived_sessions/settings.jsonl"
+        )));
         assert!(!transcript(Path::new(
             "claude/id/projects/../history.jsonl"
         )));

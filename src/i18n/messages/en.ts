@@ -9,6 +9,7 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "disk.refreshFailed": "The operation completed. Check usage again to refresh the list. {error}",
   "disk.title": "Storage space",
   "disk.scan": "Check usage",
   "disk.busy": "Working…",
@@ -3326,6 +3327,9 @@ export const en: Messages = {
   "chat.tools.go": "Open",
   "chat.tools.reload": "Reload",
   "chat.tools.stopBrowser": "Close browser",
+  "settings.sandbox.control": "Allow conversations to control an isolated Windows desktop",
+  "settings.sandbox.hint": "Shared by supported conversations. The first computer action starts Windows Sandbox. Requires Microsoft WinApp CLI 0.8 or later.",
+  "chat.tools.sandboxHint": "Computer actions run in Windows Sandbox. Change access in Settings → Chat input. You can close this panel.",
   "chat.tools.computerGrant": "Allow this conversation to view and control the primary desktop",
   "chat.tools.browserHint": "An isolated browser shared with the assistant. Watch while it works and take over when it finishes.",
   "chat.tools.computerHint": "Enable this before sending a task; LatticeTerm minimizes when it starts. Enabling during a turn minimizes immediately. Returning to this window stops further computer actions until enabled again.",

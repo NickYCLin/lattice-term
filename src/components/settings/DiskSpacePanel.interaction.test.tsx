@@ -34,6 +34,15 @@ it("scans on demand and sends only the selected maintenance action", async () =>
     expect(invoke).toHaveBeenCalledWith("disk_compress_history", { path: log.path, compress: false });
     await click("Clear WebView2 disk cache");
     expect(container.textContent).toContain("WebView2 disk cache cleared.");
+    invoke.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("scan unavailable"));
+    await click("Compress transcript");
+    expect(container.textContent).toContain("The operation completed.");
+    expect(container.textContent).toContain("scan unavailable");
+    expect(container.textContent).not.toContain(log.path);
+    const writes = invoke.mock.calls.filter(([command]) => command === "disk_compress_history").length;
+    await click("Check usage");
+    expect(container.textContent).toContain(log.path);
+    expect(invoke.mock.calls.filter(([command]) => command === "disk_compress_history")).toHaveLength(writes);
   } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
