@@ -135,6 +135,7 @@ import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   AgentIcon,
   ChatIcon,
+  CheckIcon,
   CodeFileIcon,
   TerminalIcon,
   CloseIcon,
@@ -1236,7 +1237,7 @@ export function ThreadPane({
               <label className="checkbox chat-settings__browser">
                 <input type="checkbox" checked={thread.browserEnabled === true} disabled={settingsLocked}
                   onChange={(event) => chat.updateThread(thread.id, { browserEnabled: event.target.checked })} />
-                <span className="checkbox__box" aria-hidden="true">✓</span>
+                <span className="checkbox__box" aria-hidden="true"><CheckIcon size={14} /></span>
                 <span><strong>{t("chat.browser")}</strong><small>{t("chat.browser.hint")}</small></span>
               </label>
             )}

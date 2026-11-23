@@ -363,7 +363,8 @@ select.select { display: block; }
   font-weight: 600;
 }
 
-.checkbox {
+.checkbox,
+.checkbox-row {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -382,6 +383,7 @@ select.select { display: block; }
 .checkbox__box {
   display: grid;
   place-items: center;
+  flex: none;
   width: var(--control-choice-size);
   height: var(--control-choice-size);
   border: var(--control-field-border-width) solid var(--control-field-line);
