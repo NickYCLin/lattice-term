@@ -52,6 +52,8 @@ GitHub Copilot CLI、Hermes Agent、Cursor Agent、Aider、Qwen Code、Kimi Code
 
 介面預設繁體中文，設定頁可切換英文、簡體中文、日文、韓文、西班牙文、法文、德文與巴西葡萄牙文；較新的未翻譯文字顯示英文。
 
+Windows 的 Codex／Claude 對話可以共用一個獨立桌面。「設定 → 對話輸入」中的沙箱電腦控制預設開啟，首次擷取畫面時才啟動。請先啟用 Windows Sandbox 並安裝 [Microsoft WinApp CLI 0.8 或更新版本](https://learn.microsoft.com/windows/apps/dev-tools/winapp-cli/sandbox-execution)。工具面板可以關閉；操作期間請讓 LatticeTerm 保持執行，沙箱視窗可被其他視窗蓋住。初次連線可能短暫切換焦點。助理操作的是沙箱內的程式與檔案，所有對話共用同一個沙箱。結束沙箱前，請先保存需要的成果。
+
 到「設定 → 外觀」可分別調整介面字級（100–200%）與輸出字級（12–32 px）。助理回覆、指令結果、SSH 與工作階段終端會一起調整輸出大小，不必重新連線；設定會自動儲存，也可一鍵恢復預設。
 
 [查看完整功能與限制 →](docs/FEATURES.zh-TW.md)

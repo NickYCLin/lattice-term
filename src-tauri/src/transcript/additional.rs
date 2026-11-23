@@ -131,7 +131,10 @@ fn kimi_directory(path: &Path) -> Option<(String, String)> {
     for entry in metadata["work_dirs"].as_array()? {
         let cwd = entry["path"].as_str()?;
         use md5::{Digest, Md5};
-        let hash = format!("{:x}", Md5::digest(cwd.as_bytes()));
+        let hash: String = Md5::digest(cwd.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         if hash == bucket && entry["kaos"].as_str().is_none_or(|kaos| kaos == "local") {
             return Some((id, cwd.into()));
         }
@@ -1331,6 +1334,24 @@ mod tests {
             assert!(!rows_have_user(&path, kind));
         }
     }
+    #[test]
+    fn kimi_legacy_index_matches_lowercase_padded_md5_bucket() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let cwd = "/synthetic/project";
+        let path = root.join("sessions/0bf1bb5b0142c5392a787c677ddc1506/fake/wire.jsonl");
+        write(&path, &[]);
+        write(
+            &root.join("kimi.json"),
+            &[json!({"work_dirs":[{"path":cwd,"kaos":"local"}]})],
+        );
+
+        assert_eq!(
+            metadata(&path, TranscriptKind::Kimi),
+            Some(("fake".into(), cwd.into()))
+        );
+    }
+
     #[test]
     fn kimi_new_journal_contract_and_unknown_mutations_are_explicit() {
         let (_dir, path) = fixture(TranscriptKind::Kimi);

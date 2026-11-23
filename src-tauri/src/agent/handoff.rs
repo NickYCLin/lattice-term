@@ -41,7 +41,7 @@ impl Handoff {
             registry: Arc::downgrade(registry),
             idle_since: None,
             foreground_until: None,
-            timeout: Duration::from_secs(120),
+            timeout: Duration::ZERO,
         }
     }
 }

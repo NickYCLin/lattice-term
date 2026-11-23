@@ -1,4 +1,5 @@
 import { DesktopDescription } from "../common/MobilePresentation";
+import { CheckIcon } from "../icons";
 import { useCallback, useEffect, useState } from "react";
 import type { ConnectionProfile } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
@@ -124,21 +125,21 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       {available && <label className="checkbox mcp-remote__book">
         <input type="checkbox" checked={book} disabled={busy}
           onChange={(event) => void shareBook(event.currentTarget.checked)} />
-        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="checkbox__box" aria-hidden="true"><CheckIcon size={14} /></span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.book")}</strong>
           <DesktopDescription><span>{t("settings.mcpRemote.book.hint")}</span></DesktopDescription></span>
       </label>}
       {available && <label className="checkbox mcp-remote__book">
         <input type="checkbox" checked={trustAll} disabled={busy}
           onChange={(event) => void shareTrustAll(event.currentTarget.checked)} />
-        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="checkbox__box" aria-hidden="true"><CheckIcon size={14} /></span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.trustAll")}</strong>
           <span>{t("settings.mcpRemote.trustAll.hint")}</span></span>
       </label>}
       {available && <label className="checkbox mcp-remote__book">
         <input type="checkbox" checked={allowRemote} disabled={busy}
           onChange={(event) => void shareRemote(event.currentTarget.checked)} />
-        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="checkbox__box" aria-hidden="true"><CheckIcon size={14} /></span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.autoAllow")}</strong>
           <DesktopDescription><span>{t("settings.mcpRemote.autoAllow.hint")}</span></DesktopDescription></span>
       </label>}
