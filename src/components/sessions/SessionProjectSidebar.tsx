@@ -594,6 +594,7 @@ export function SessionProjectSidebar({
 
   function renderSession(session: SessionSidebarSessionItem, depth: number) {
     const Glyph = glyphFor(session.kind);
+    const title = session.kind !== "agent" ? session.searchText ?? session.label : session.label;
     return (
       <div
         role="listitem"
@@ -612,11 +613,13 @@ export function SessionProjectSidebar({
           type="button"
           className="session-tree__session-select"
           onClick={() => onSelect(session.sessionId)}
-          title={`${session.label} · ${t("terminal.projects.dragHint")}`}
+          title={`${title} · ${t("terminal.projects.dragHint")}`}
         >
           <Glyph size={12} pulse={session.status} />
           <span className="session-tree__session-identity">
-            <span className="truncate">{session.label}</span>
+            <span className={session.kind === "agent" ? "truncate" : "session-tree__session-host"}>
+              {session.label}
+            </span>
             {session.detail && (
               <span className="session-tree__session-detail truncate">
                 {session.detail}

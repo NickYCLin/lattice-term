@@ -28,7 +28,7 @@ it.each(["agent", "ssh"])("runs every %s mobile session header action without po
   const empty = { sessions: [], lastClosed: null };
   const disconnect = vi.fn(async () => {}), attachToSsh = vi.fn(async () => ({ outcome: "connected", session: { sessionId: "sftp-fixture" } }));
   const onSelect = vi.fn(), onOpenInChat = vi.fn();
-  const view = { agents, ssh: kind === "ssh" ? { ...empty, disconnect, sessions: [{ sessionId: "ssh-fixture", profileId: "synthetic", host: "192.0.2.1", port: 22, username: "fixture" }] } : empty,
+  const view = { agents, ssh: kind === "ssh" ? { ...empty, disconnect, sessions: [{ sessionId: "ssh-fixture", profileId: "synthetic", host: "long-hostname-for-remote-session.example.test", port: 22, username: "fixture" }] } : empty,
     sftp: { ...empty, sessions: [{ sessionId: "sftp-fixture" }], attachToSsh }, remote: empty, rdp: empty, vnc: empty,
     activeSessionId: kind === "agent" ? "s1" : "ssh-fixture", onSelect, onOpenInChat, mobile: true,
     theme: "dark", sessionRestoreComplete: true, restoredWorkspaceSessions: [], unrestoredWorkspaceSessions: [] } as unknown as Parameters<typeof SessionsView>[0];
@@ -58,6 +58,9 @@ it.each(["agent", "ssh"])("runs every %s mobile session header action without po
       await act(async () => props(input).onKeyDown({ key: "Enter", preventDefault: vi.fn() }));
       expect(agents.rename).toHaveBeenCalledWith("s1", "Synthetic renamed");
     } else {
+      const hostLabel = allNodes(host).find(node => props(node)?.className === "session-tree__session-host");
+      expect(hostLabel?.textContent).toBe("long-hostname-for-remote-session.example.test");
+      expect(allNodes(host).find(node => props(node)?.className === "session-tree__session-detail truncate")?.textContent).toBe("fixture");
       const initiallyOpen = props(button("開啟檔案總管（SFTP）"))["aria-pressed"];
       await tap("開啟檔案總管（SFTP）");
       expect(props(button("開啟檔案總管（SFTP）"))["aria-pressed"]).toBe(!initiallyOpen);

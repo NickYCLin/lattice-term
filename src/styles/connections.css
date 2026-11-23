@@ -2033,6 +2033,11 @@
   font-weight: 500;
 }
 
+.session-tree__session-host {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .session-tree__folder-select,
 .session-tree__project-select {
   flex: 1;

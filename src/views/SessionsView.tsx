@@ -139,11 +139,14 @@ type SessionRef =
       groupId: string;
       members: AgentSessionSummary[];
     }
-  | { kind: "ssh"; sessionId: string; profileId: string; label: string }
-  | { kind: "sftp"; sessionId: string; profileId: string; label: string }
-  | { kind: "remote"; sessionId: string; profileId: string; label: string }
-  | { kind: "rdp"; sessionId: string; profileId: string; label: string }
-  | { kind: "vnc"; sessionId: string; profileId: string; label: string };
+  | {
+      kind: "ssh" | "sftp" | "remote" | "rdp" | "vnc";
+      sessionId: string;
+      profileId: string;
+      label: string;
+      sidebarLabel: string;
+      sidebarDetail?: string;
+    };
 
 type AgentSessionRef = Extract<SessionRef, { kind: "agent" }>;
 
@@ -1012,6 +1015,8 @@ export function SessionsView({
       sessionId: session.sessionId,
       profileId: session.profileId,
       label: `${session.username}@${session.host}`,
+      sidebarLabel: session.host,
+      sidebarDetail: session.username,
     })),
     ...sftp.sessions
       .filter((session) => !pairedSftpIds.has(session.sessionId))
@@ -1020,24 +1025,30 @@ export function SessionsView({
         sessionId: session.sessionId,
         profileId: session.profileId,
         label: `${session.username}@${session.host}`,
+        sidebarLabel: session.host,
+        sidebarDetail: session.username,
       })),
     ...remote.sessions.map((session) => ({
       kind: "remote" as const,
       sessionId: session.sessionId,
       profileId: session.profileId,
       label: session.agentName,
+      sidebarLabel: session.agentName,
     })),
     ...rdp.sessions.map((session) => ({
       kind: "rdp" as const,
       sessionId: session.sessionId,
       profileId: session.profileId,
       label: `${session.username}@${session.host}`,
+      sidebarLabel: session.host,
+      sidebarDetail: session.username,
     })),
     ...vnc.sessions.map((session) => ({
       kind: "vnc" as const,
       sessionId: session.sessionId,
       profileId: session.profileId,
       label: `${session.host}:${session.port}`,
+      sidebarLabel: `${session.host}:${session.port}`,
     })),
   ];
 
@@ -1325,7 +1336,8 @@ export function SessionsView({
           {
             nodeId: sidebarSessionNodeId(session),
             sessionId: session.sessionId,
-            label: session.label,
+            label: session.sidebarLabel,
+            detail: session.sidebarDetail,
             kind: session.kind,
             searchText: session.label,
             status: "connected" as const,
