@@ -965,6 +965,10 @@
   flex-direction: column;
 }
 
+.setting-list--form {
+  gap: var(--space-4);
+}
+
 .typography-settings {
   min-width: 0;
   padding-bottom: var(--space-4);
