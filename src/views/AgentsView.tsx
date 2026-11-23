@@ -40,6 +40,7 @@ import type { AgentMcpAccessApi } from "../app/useAgentMcpAccess";
 import { claudeCodeCommand, codexCommand, mcpServersJson } from "../app/agentMcpConfig";
 import {
   AgentIcon,
+  CheckIcon,
   ChevronDownIcon,
   EditIcon,
   FolderIcon,
@@ -798,7 +799,7 @@ export function AgentsView({
               onChange={(event) => setSandbox(event.currentTarget.checked)}
             />
             <span className="checkbox__box" aria-hidden="true">
-              ✓
+              <CheckIcon size={14} />
             </span>
             <span className="agents-sandbox__label">
               <strong>{t("agents.sandbox")}</strong>
@@ -814,7 +815,7 @@ export function AgentsView({
             onChange={(event) => setDetached(event.currentTarget.checked)}
           />
           <span className="checkbox__box" aria-hidden="true">
-            ✓
+            <CheckIcon size={14} />
           </span>
           <span className="agents-sandbox__label">
             <strong>{t("agents.detached")}</strong>
@@ -918,7 +919,7 @@ export function AgentsView({
                 onChange={(event) => toggleMcpLaunch(event.currentTarget.checked)}
               />
               <span className="checkbox__box" aria-hidden="true">
-                ✓
+                <CheckIcon size={14} />
               </span>
               <span className="agents-sandbox__label">
                 <strong>{t("agents.mcp.launch")}</strong>
@@ -1539,7 +1540,7 @@ export function AgentsView({
                   }
                 />
                 <span className="checkbox__box" aria-hidden="true">
-                  ✓
+                  <CheckIcon size={14} />
                 </span>
                 <span className="agents-broadcast__target-label">
                   <strong>{session.label}</strong>
