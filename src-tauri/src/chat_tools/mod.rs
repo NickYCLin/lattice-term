@@ -3,6 +3,8 @@
 pub mod browser;
 pub mod computer;
 pub mod images;
+#[cfg(windows)]
+pub(crate) mod sandbox;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -24,6 +26,8 @@ pub fn set_data_root(path: PathBuf) {
     let _ = DATA_ROOT.set(path);
 }
 const MAX_REQUEST: usize = 64 * 1024;
+// A cold Windows Sandbox can take several minutes before the guest logs on.
+const TOOL_TIMEOUT_SECS: u64 = if cfg!(windows) { 420 } else { 190 };
 struct Endpoint {
     url: String,
     directory: PathBuf,
@@ -103,7 +107,7 @@ pub async fn ensure(id: &str, directory: PathBuf, browser_enabled: bool) -> Resu
             tokio::spawn(async move {
                 let _permit = permit;
                 let _ = tokio::time::timeout(
-                    Duration::from_secs(195),
+                    Duration::from_secs(TOOL_TIMEOUT_SECS + 5),
                     connection(stream, &id, &root, &browser, &active, &token),
                 )
                 .await;
@@ -282,7 +286,7 @@ async fn dispatch(
             }
         }
         // Advertise stable tool names; permissions are checked again per call.
-        tools.push(tool("computer_screenshot", "Capture the primary desktop only after the user enabled computer control in this conversation.", json!({}), &[]));
+        tools.push(tool("computer_screenshot", if cfg!(windows) { "Capture the isolated Windows Sandbox desktop. Apps and files on the host desktop are separate." } else { "Capture the primary desktop only after the user enabled computer control in this conversation." }, json!({}), &[]));
         for (name, properties, required) in [
             (
                 "computer_click",
@@ -305,7 +309,7 @@ async fn dispatch(
                 vec!["units", "fingerprint"],
             ),
         ] {
-            tools.push(tool(name, "Act on the last captured primary desktop. Requires an enabled conversation grant and a fresh, unchanged screenshot fingerprint. Every input consumes the receipt.", properties, &required));
+            tools.push(tool(name, "Act only on the desktop returned by computer_screenshot. Requires access and a fresh, unchanged screenshot fingerprint. Every input consumes the receipt.", properties, &required));
         }
         tools.push(tool("generate_image", "Generate one image using the image service explicitly selected by the user in this conversation. This can incur the service's charges; only call when the user requests image generation. No source can be selected by the tool itself.", json!({"prompt":{"type":"string"}}), &["prompt"]));
         return Ok(json!({"tools":tools}));
@@ -399,7 +403,7 @@ async fn stdio() -> i32 {
     let Ok(client) = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(190))
+        .timeout(Duration::from_secs(TOOL_TIMEOUT_SECS))
         .build()
     else {
         return 1;

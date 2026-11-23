@@ -58,6 +58,8 @@ function renderSettings(platform: string, update: Partial<AppUpdater> = {}): str
 
 describe("Settings updater platform boundary", () => {
   it("offers an on-demand disk scan on Windows", () => {
+    expect(renderSettings("windows")).toContain(zhTW["settings.sandbox.control"]);
+    expect(renderSettings("linux")).not.toContain(zhTW["settings.sandbox.control"]);
     expect(renderSettings("windows")).toContain(zhTW["disk.scan"]);
     expect(renderSettings("linux")).not.toContain(zhTW["disk.scan"]);
     expect(renderSettings("android")).not.toContain(zhTW["disk.scan"]);

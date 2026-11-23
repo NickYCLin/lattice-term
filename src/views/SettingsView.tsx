@@ -371,7 +371,7 @@ export function SettingsView({
         </div>
       </section>
 
-      {!isMobilePlatform(summary?.platform) && <ChatInputSettings preferences={preferences} onChange={onChange} />}
+      {!isMobilePlatform(summary?.platform) && <ChatInputSettings windowsDesktop={desktopBackendAvailable && summary?.platform === "windows"} preferences={preferences} onChange={onChange} />}
 
       <section className="panel glass glass--sheen">
         <header className="panel__head">

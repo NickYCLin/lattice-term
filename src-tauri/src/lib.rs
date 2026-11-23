@@ -1478,7 +1478,8 @@ async fn agent_enqueue(
             &session_id,
             &data,
         );
-        if result.as_ref().is_ok_and(|count| *count == 0)
+        if !cfg!(windows)
+            && result.as_ref().is_ok_and(|count| *count == 0)
             && crate::chat_tools::computer::enabled(&session_id).await
             && minimize_for_computer(&app).is_err()
         {
@@ -1958,7 +1959,11 @@ async fn agent_chat_send(
         request,
     )
     .await;
-    if result.is_ok() && allow_computer && crate::chat_tools::computer::enabled(&thread_id).await {
+    if !cfg!(windows)
+        && result.is_ok()
+        && allow_computer
+        && crate::chat_tools::computer::enabled(&thread_id).await
+    {
         let minimized = minimize_for_computer(&app).is_ok();
         if !minimized {
             let _ = crate::chat_tools::computer::enable(&thread_id, false).await;
@@ -3860,6 +3865,9 @@ async fn chat_computer_enable(
     if enabled {
         return Err("電腦控制僅支援桌面版。".into());
     }
+    if cfg!(windows) {
+        return Err("Windows 電腦控制請至共用設定調整。".into());
+    }
     crate::chat_tools::computer::enable(&thread_id, enabled).await?;
     if enabled && start_now.unwrap_or(false) {
         let result = minimize_for_computer(&app);
@@ -3899,8 +3907,12 @@ async fn chat_image_generate(
 #[tauri::command]
 async fn chat_tools_status(thread_id: String) -> Result<serde_json::Value, String> {
     crate::chat_tools::checked_id(&thread_id)?;
+    #[cfg(windows)]
+    let computer = crate::chat_tools::sandbox::allowed()?;
+    #[cfg(not(windows))]
+    let computer = crate::chat_tools::computer::enabled(&thread_id).await;
     Ok(
-        serde_json::json!({"computer":crate::chat_tools::computer::enabled(&thread_id).await,"images":crate::chat_tools::images::configured(&thread_id).await,"imageSource":crate::chat_tools::images::source(&thread_id).await}),
+        serde_json::json!({"isolated":cfg!(windows),"computer":computer,"images":crate::chat_tools::images::configured(&thread_id).await,"imageSource":crate::chat_tools::images::source(&thread_id).await}),
     )
 }
 
@@ -6722,6 +6734,8 @@ pub fn run() {
             local_terminal_close,
             chat_browser_action,
             chat_session_browser_enabled,
+            #[cfg(windows)]
+            chat_tools::sandbox::chat_sandbox_preference,
             chat_computer_enable,
             chat_computer_action,
             chat_image_configure,

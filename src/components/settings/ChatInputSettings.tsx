@@ -1,14 +1,17 @@
 import { MemoryCompactionSettings } from "./MemoryCompactionSettings";
+import { SandboxComputerSetting } from "./SandboxComputerSetting";
 import type { Preferences } from "../../app/preferences";
 import { useI18n } from "../../i18n/context";
 
-export function ChatInputSettings({ preferences, onChange }: {
+export function ChatInputSettings({ preferences, onChange, windowsDesktop }: {
+  windowsDesktop?: boolean;
   preferences: Preferences; onChange: (patch: Partial<Preferences>) => void;
 }) {
   const { t } = useI18n();
   return <><section className="panel glass glass--sheen">
     <header className="panel__head"><h2 className="panel__title">{t("settings.chatInput.title")}</h2></header>
     <div className="setting-list">
+      {windowsDesktop && <SandboxComputerSetting />}
       <label className="field"><span className="field__label">{t("handoff.setting")}</span>
         <select className="select" value={preferences.codexHandoffMinutes} onChange={event => onChange({ codexHandoffMinutes: Number(event.target.value) })}>
           <option value={0}>{t("handoff.off")}</option>{[2,5,10].map(minutes => <option key={minutes} value={minutes}>{t("handoff.minutes", { minutes })}</option>)}
