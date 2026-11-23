@@ -8,7 +8,7 @@ import {
   type NotificationSoundChoice,
 } from "../../app/notificationSounds";
 import { useI18n } from "../../i18n/context";
-import { PlayIcon } from "../icons";
+import { CheckIcon, PlayIcon } from "../icons";
 
 export function NotificationSoundPanel({ preferences, onChange }: {
   preferences: Preferences;
@@ -64,7 +64,7 @@ export function NotificationSoundPanel({ preferences, onChange }: {
           checked={preferences.chatCompletionNotification}
           onChange={(e) => onChange({ chatCompletionNotification: e.target.checked })}
         />
-        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="checkbox__box" aria-hidden="true"><CheckIcon size={14} /></span>
         <span>
           <strong>{t("settings.notifications.system")}</strong>
           <DesktopDescription><small className="field__optional">{t("settings.notifications.systemHint")}</small></DesktopDescription>

@@ -9,12 +9,13 @@ export function ChatTools({ threadId, directory, busy, assistantTools, browserEn
   const [tab, setTab] = useState<"browser" | "computer" | "images">("browser");
   const [frames, setFrames] = useState<Partial<Record<"browser" | "computer", Frame>>>({});
   const [started, setStarted] = useState(false); const [computer, setComputer] = useState(false); const [configured, setConfigured] = useState(false);
+  const [isolated, setIsolated] = useState<boolean | null>(null);
   const [url, setUrl] = useState("https://example.com"); const [text, setText] = useState("");
   const [proxyId, setProxyId] = useState(proxies[0]?.id ?? ""); const [model, setModel] = useState(""); const [prompt, setPrompt] = useState(""); const [image, setImage] = useState("");
   const [working, setWorking] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const mounted = useRef(true); const lock = useRef(false); const frameRef = useRef(frames); frameRef.current = frames;
-  useEffect(() => { mounted.current = true; void invoke<{ computer: boolean; images: boolean; imageSource?: { proxyId: string; model: string } | null }>("chat_tools_status", { threadId }).then(status => { if (mounted.current) { setComputer(status.computer); setConfigured(status.images); if (status.imageSource) { setProxyId(status.imageSource.proxyId); setModel(status.imageSource.model); } } }).catch(() => {}); return () => { mounted.current = false; }; }, [threadId]);
-  useEffect(() => { const stopComputer = () => { setComputer(false); setFrames(current => ({ ...current, computer: undefined })); void invoke("chat_computer_enable", { threadId, enabled: false }).catch(() => {}); }; window.addEventListener("focus", stopComputer); return () => window.removeEventListener("focus", stopComputer); }, [threadId]);
+  useEffect(() => { mounted.current = true; void invoke<{ computer: boolean; isolated: boolean; images: boolean; imageSource?: { proxyId: string; model: string } | null }>("chat_tools_status", { threadId }).then(status => { if (mounted.current) { setIsolated(status.isolated === true); setComputer(status.computer); setConfigured(status.images); if (status.imageSource) { setProxyId(status.imageSource.proxyId); setModel(status.imageSource.model); } } }).catch(() => {}); return () => { mounted.current = false; }; }, [threadId]);
+  useEffect(() => { if (isolated !== false) return; const stopComputer = () => { setComputer(false); setFrames(current => ({ ...current, computer: undefined })); void invoke("chat_computer_enable", { threadId, enabled: false }).catch(() => {}); }; window.addEventListener("focus", stopComputer); return () => window.removeEventListener("focus", stopComputer); }, [threadId, isolated]);
   async function act(action: () => Promise<void>, quiet = false) {
     if (lock.current) return; lock.current = true; setWorking(true); if (!quiet) { setError(""); setNotice(""); }
     try { await action(); } catch (reason) { if (mounted.current) setError(String(reason)); } finally { lock.current = false; if (mounted.current) setWorking(false); }
@@ -45,8 +46,8 @@ export function ChatTools({ threadId, directory, busy, assistantTools, browserEn
       <button type="button" className="button button--ghost button--sm" disabled={unavailable} onClick={() => void act(() => command("browser", "reload"))}>{t("chat.tools.reload")}</button>
       {started && <button type="button" className="button button--ghost button--sm" disabled={working || busy} onClick={() => void act(async () => { setStarted(false); await invoke("chat_browser_action", { threadId, action: "close", args: {} }); setFrames(current => ({ ...current, browser: undefined })); })}>{t("chat.tools.stopBrowser")}</button>}
     </form>}
-    {tab === "computer" && <label className="chat-tools__permission"><input type="checkbox" checked={computer} disabled={working || !assistantTools} onChange={event => { const enabled = event.target.checked; void act(async () => { await invoke("chat_computer_enable", { threadId, enabled, startNow: busy }); setComputer(enabled); if (!enabled) setFrames(current => ({ ...current, computer: undefined })); }); }} />{t("chat.tools.computerGrant")}</label>}
-    {tab === "computer" && <p className="chat-settings__hint">{t("chat.tools.computerHint")}</p>}
+    {tab === "computer" && isolated === false && <label className="chat-tools__permission"><input type="checkbox" checked={computer} disabled={working || !assistantTools} onChange={event => { const enabled = event.target.checked; void act(async () => { await invoke("chat_computer_enable", { threadId, enabled, startNow: busy }); setComputer(enabled); if (!enabled) setFrames(current => ({ ...current, computer: undefined })); }); }} />{t("chat.tools.computerGrant")}</label>}
+    {tab === "computer" && isolated !== null && <p className="chat-settings__hint">{t(isolated ? "chat.tools.sandboxHint" : "chat.tools.computerHint")}</p>}
     {tab === "browser" && <>
       <p className="chat-settings__hint">{t(tab === "browser" ? "chat.tools.browserHint" : "chat.tools.computerHint")}</p>
       <div className="chat-tools__screen">{frame?.image ? <img src={`data:image/jpeg;base64,${frame.image}`} alt={frame.title ?? t(`chat.tools.${tab}`)} tabIndex={0}

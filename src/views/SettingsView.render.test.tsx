@@ -57,6 +57,13 @@ function renderSettings(platform: string, update: Partial<AppUpdater> = {}): str
 }
 
 describe("Settings updater platform boundary", () => {
+  it("offers an on-demand disk scan on Windows", () => {
+    expect(renderSettings("windows")).toContain(zhTW["settings.sandbox.control"]);
+    expect(renderSettings("linux")).not.toContain(zhTW["settings.sandbox.control"]);
+    expect(renderSettings("windows")).toContain(zhTW["disk.scan"]);
+    expect(renderSettings("linux")).not.toContain(zhTW["disk.scan"]);
+    expect(renderSettings("android")).not.toContain(zhTW["disk.scan"]);
+  });
   it("offers independent labelled text sizes, output preview and reset", () => {
     const markup = renderSettings("windows");
     expect(markup).toContain("介面字級");
@@ -137,6 +144,7 @@ describe("Settings updater platform boundary", () => {
     expect(markup).toContain('id="sound-agentCompletionSound"');
     expect(markup).toContain('id="sound-chatCompletionSound"');
     expect(markup).toContain('id="notification-volume"');
+    expect(markup).toMatch(/class="checkbox__box" aria-hidden="true"><svg\b/);
     expect(markup.match(/class="sound-cue"/g)).toHaveLength(12);
     expect(markup).not.toContain("白瓷");
     expect(markup).not.toContain('value="clear"');
@@ -167,6 +175,8 @@ it.each(["ios", "android"])("hides local chat and memory settings on %s while ke
 it.each(["linux", "macos"])("retains local chat and memory settings on %s", platform => {
   const html=renderSettings(platform);
   expect(html).toContain(">對話輸入</h2>");expect(html).toContain("記憶與交接壓縮");
+  expect(html).toContain('class="setting-list setting-list--form"');
+  expect(html).toMatch(/class="checkbox-row"><input type="checkbox"/);
 });
 
 it.each(["ios", "android"])("hides settings explanations on %s while retaining titles and controls", platform => {

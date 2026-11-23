@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { mergeAttachmentPaths, CHAT_ATTACHMENT_LIMIT } from "../../app/chatAttachments";
 import type { ChatAttachment } from "../../app/agentChat";
 import { SentAttachments } from "./SentAttachments";
+import { CheckIcon } from "../icons";
 import {
   delegationPrompt,
   delegationResult,
@@ -207,7 +208,7 @@ export function ChatDelegations({
           </label>
           <label className="checkbox">
             <input type="checkbox" checked={withContext} onChange={(event) => setWithContext(event.target.checked)} />
-            <span className="checkbox__box" aria-hidden="true">✓</span>
+            <span className="checkbox__box" aria-hidden="true"><CheckIcon size={14} /></span>
             <span>{t("chat.delegate.withContext")}</span>
           </label>
           {!target && <div className="chat-card__actions">
