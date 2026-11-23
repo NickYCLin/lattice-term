@@ -3,8 +3,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { allNodes, installHostDom, props } from "../agents/testFixtures/interactionDom";
 import { createAutomation, emptyAutomationDraft } from "../../app/agentAutomations";
-import { fakeAutomationsApi, fakeChatApi, installFakeStorage } from "../../app/testFixtures/agentApis";
+import { fakeAgentApi, fakeAutomationsApi, fakeChatApi, fakeDefinition, installFakeStorage } from "../../app/testFixtures/agentApis";
 import { I18nProvider } from "../../i18n";
+import { ChatView } from "../../views/ChatView";
 import { AutomationPane } from "./AutomationPane";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => "/synthetic/project") }));
@@ -50,8 +51,6 @@ it.each([false, true])("keeps schedule visible beside save and validates the req
 });
 
 it("keeps new drafts separate from the automatically selected schedule and follows selection changes", async () => {
-  const { ChatView } = await import("../../views/ChatView");
-  const { fakeAgentApi, fakeDefinition } = await import("../../app/testFixtures/agentApis");
   const cleanup = installFakeStorage();
   const host = installHostDom();
   const root = createRoot(host as unknown as Element);
