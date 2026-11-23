@@ -10,7 +10,7 @@ export function ChatInputSettings({ preferences, onChange, windowsDesktop }: {
   const { t } = useI18n();
   return <><section className="panel glass glass--sheen">
     <header className="panel__head"><h2 className="panel__title">{t("settings.chatInput.title")}</h2></header>
-    <div className="setting-list">
+    <div className="setting-list setting-list--form">
       {windowsDesktop && <SandboxComputerSetting />}
       <label className="field"><span className="field__label">{t("handoff.setting")}</span>
         <select className="select" value={preferences.codexHandoffMinutes} onChange={event => onChange({ codexHandoffMinutes: Number(event.target.value) })}>
@@ -30,7 +30,7 @@ export function ChatInputSettings({ preferences, onChange, windowsDesktop }: {
         </select>
         <span className="field__optional">{t("settings.chatInput.hint")}</span>
       </label>
-      <label className="field"><span><input type="checkbox" checked={preferences.chatCollapseCompletedTurns}
+      <label className="field"><span className="checkbox-row"><input type="checkbox" checked={preferences.chatCollapseCompletedTurns}
         onChange={event => onChange({ chatCollapseCompletedTurns: event.target.checked })} />{t("chat.process.setting")}</span>
         <span className="field__optional">{t("chat.process.settingHint")}</span>
       </label>

@@ -23,7 +23,7 @@ export function SandboxComputerSetting() {
     finally { setBusy(false); }
   }
   return <label className="field">
-    <span><input type="checkbox" checked={enabled === true} disabled={enabled === null || busy}
+    <span className="checkbox-row"><input type="checkbox" checked={enabled === true} disabled={enabled === null || busy}
       onChange={e => void change(e.target.checked)} />{t("settings.sandbox.control")}</span>
     <span className="field__optional">{t("settings.sandbox.hint")}</span>
     {error && <span role="alert">{error}</span>}

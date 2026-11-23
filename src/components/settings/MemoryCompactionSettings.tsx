@@ -55,7 +55,7 @@ export function MemoryCompactionSettings() {
         >
           <fieldset
             disabled={busy}
-            className="setting-list memory-compaction-settings"
+            className="setting-list setting-list--form memory-compaction-settings"
           >
             <label className="field">
               {t("memory.limit")}
@@ -115,7 +115,7 @@ export function MemoryCompactionSettings() {
                 }
               />
             </label>
-            <label>
+            <label className="checkbox-row">
               <input
                 type="checkbox"
                 checked={value.preferences.aiEnabled}
