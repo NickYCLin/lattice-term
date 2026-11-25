@@ -11,6 +11,7 @@ import {
   environmentLabelKey,
   findProtocol,
   protocolCatalog,
+  tagKey,
   UNGROUPED,
   type Environment,
   type Protocol,
@@ -255,14 +256,19 @@ export const ResourceSidebar = forwardRef<
             </h2>
             <div className="sidebar__chips">
               {tags.map((tag) => {
-                const pressed = filter.tags.includes(tag);
+                const key = tagKey(tag);
+                const pressed = filter.tags.some((entry) => tagKey(entry) === key);
                 return (
                   <button
                     type="button"
-                    key={tag}
+                    key={key}
                     className={`filter-chip${pressed ? " is-on" : ""}`}
                     aria-pressed={pressed}
-                    onClick={() => patch({ tags: toggle(filter.tags, tag) })}
+                    onClick={() => patch({
+                      tags: pressed
+                        ? filter.tags.filter((entry) => tagKey(entry) !== key)
+                        : [...filter.tags, tag],
+                    })}
                   >
                     {tag}
                   </button>

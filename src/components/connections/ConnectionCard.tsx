@@ -13,6 +13,7 @@ import { handleMenuNavigation } from "../overlays/menuNavigation";
 import {
   connectionTarget,
   findProtocol,
+  uniqueTags,
   type ConnectionProfile,
 } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
@@ -84,7 +85,7 @@ export function ConnectionCard({
   const routes: LinkedRoute[] = [{ profile, onConnect }, ...linked];
   const connectable = routes.filter((route) => route.onConnect);
   const protocols = [...new Set(routes.map((route) => route.profile.protocol))];
-  const tags = [...new Set(routes.flatMap((route) => route.profile.tags))];
+  const tags = uniqueTags(routes.flatMap((route) => route.profile.tags));
   const menuId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0, width: 240, maxHeight: 0 });

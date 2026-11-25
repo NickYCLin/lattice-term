@@ -56,6 +56,14 @@ describe("connection card runtime capability", () => {
     expect(renderCard({ profile: { ...profile, tags: [] } })).not.toContain('class="connection-card__tags"');
   });
 
+  it("keeps the displayed tag case and merges case variants from linked routes", () => {
+    const markup = renderCard({ profile: { ...profile, tags: ["Server_A"] }, linked: [{
+      profile: { ...profile, id: "internal", tags: ["server_a"] },
+    }] });
+    expect(markup).toContain(">Server_A</span>");
+    expect(markup).not.toContain(">server_a</span>");
+  });
+
   it("keeps same-protocol routes behind a single connect button", () => {
     const markup = renderCard({ onConnect: vi.fn(), linked: [{
       profile: { ...profile, id: "wan", hostname: "wan.example.com", port: 3390 }, onConnect: vi.fn(),

@@ -223,16 +223,27 @@ export function draftFromProfile(profile: ConnectionProfile): ConnectionDraft {
 }
 
 /** Splits a free-text tag field into normalised, de-duplicated tags. */
-export function parseTags(input: string | string[]): string[] {
-  const parts = Array.isArray(input) ? input : input.split(/[,\n]/);
-  const seen = new Set<string>();
+export function tagKey(tag: string): string {
+  return tag.toLowerCase();
+}
 
-  for (const part of parts) {
-    const tag = part.trim().replace(/\s+/g, "-").toLowerCase();
-    if (tag) seen.add(tag);
+export function uniqueTags(tags: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const tag of tags) {
+    const key = tagKey(tag);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(tag);
   }
 
-  return [...seen];
+  return result;
+}
+
+export function parseTags(input: string | string[]): string[] {
+  const parts = Array.isArray(input) ? input : input.split(/[,\n]/);
+  return uniqueTags(parts.map((part) => part.trim().replace(/\s+/g, "-")).filter(Boolean));
 }
 
 /**

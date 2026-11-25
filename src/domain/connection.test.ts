@@ -40,7 +40,7 @@ describe("connection profiles", () => {
       port: 22,
       environment: "production",
       group: "Core platform",
-      tags: ["edge", "eu-west"],
+      tags: ["Edge", "eu-west"],
       favorite: true,
     });
   });
@@ -156,8 +156,9 @@ describe("connection profiles", () => {
 });
 
 describe("tag parsing", () => {
-  it("splits, normalizes and de-duplicates tag input", () => {
-    expect(parseTags("Edge, edge\nEU West ,, ")).toEqual(["edge", "eu-west"]);
+  it("keeps the first spelling while normalizing whitespace and removing duplicates", () => {
+    expect(parseTags("Edge, edge\nEU West ,, ")).toEqual(["Edge", "EU-West"]);
+    expect(parseTags(["Server_A", "server_a", "dev"])).toEqual(["Server_A", "dev"]);
   });
 });
 

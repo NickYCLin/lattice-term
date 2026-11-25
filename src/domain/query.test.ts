@@ -102,6 +102,15 @@ describe("filtering", () => {
     ).toHaveLength(0);
   });
 
+  it("matches mixed-case and legacy lowercase tags with the same filter", () => {
+    const mixed = profile({ id: "mixed", tags: ["Edge", "EU-West"] });
+    expect(filterProfiles([...all, mixed], {
+      ...emptyFilter,
+      tags: ["EDGE", "eu-west"],
+      search: "Eu-WeSt",
+    })).toEqual([gateway, mixed]);
+  });
+
   it("filters by favorites and by group", () => {
     expect(
       filterProfiles(all, { ...emptyFilter, favoritesOnly: true }).map(
@@ -164,5 +173,6 @@ describe("grouping", () => {
 
   it("collects a sorted, de-duplicated tag list", () => {
     expect(collectTags(all)).toEqual(["ci", "edge", "eu-west"]);
+    expect(collectTags([profile({ tags: ["Edge"] }), ...all])).toEqual(["ci", "Edge", "eu-west"]);
   });
 });

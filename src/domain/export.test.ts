@@ -16,7 +16,7 @@ describe("export & import", () => {
       port: 22,
       environment: "production",
       group: "Infra",
-      tags: ["edge", "eu"],
+      tags: ["Edge", "eu"],
       favorite: true,
     },
     "p-1",
@@ -43,7 +43,7 @@ describe("export & import", () => {
     expect(parsed.exportedAt).toBe("2026-08-20T00:00:00.000Z");
     expect(parsed.profiles).toHaveLength(2);
     expect(parsed.profiles[0].name).toBe("Gateway");
-    expect(parsed.profiles[0].tags).toEqual(["edge", "eu"]);
+    expect(parsed.profiles[0].tags).toEqual(["Edge", "eu"]);
   });
 
   it("keeps the same-computer link through export and import", () => {
@@ -66,6 +66,7 @@ describe("export & import", () => {
     expect(result.validProfiles).toHaveLength(2);
     expect(result.validProfiles[0].name).toBe("Gateway");
     expect(result.validProfiles[0].protocol).toBe("ssh");
+    expect(result.validProfiles[0].tags).toEqual(["Edge", "eu"]);
     expect(result.validProfiles[1].name).toBe("Windows Desktop");
     expect(result.validProfiles[1].protocol).toBe("rdp");
   });

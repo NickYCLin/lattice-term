@@ -8,6 +8,8 @@
 import {
   UNGROUPED,
   connectionTarget,
+  tagKey,
+  uniqueTags,
   type ConnectionProfile,
   type Environment,
   type Protocol,
@@ -70,6 +72,7 @@ export function filterProfiles(
   profiles: ConnectionProfile[],
   filter: ConnectionFilter,
 ): ConnectionProfile[] {
+  const selectedTagKeys = filter.tags.map(tagKey);
   return profiles.filter((profile) => {
     if (filter.favoritesOnly && !profile.favorite) return false;
     if (filter.group !== null && profile.group !== filter.group) return false;
@@ -85,11 +88,9 @@ export function filterProfiles(
     ) {
       return false;
     }
-    if (
-      filter.tags.length > 0 &&
-      !filter.tags.every((tag) => profile.tags.includes(tag))
-    ) {
-      return false;
+    if (selectedTagKeys.length > 0) {
+      const profileTagKeys = new Set(profile.tags.map(tagKey));
+      if (!selectedTagKeys.every((key) => profileTagKeys.has(key))) return false;
     }
     return matchesSearch(profile, filter.search);
   });
@@ -159,9 +160,6 @@ export function groupProfiles(
 }
 
 export function collectTags(profiles: ConnectionProfile[]): string[] {
-  const tags = new Set<string>();
-  for (const profile of profiles) {
-    for (const tag of profile.tags) tags.add(tag);
-  }
-  return [...tags].sort((a, b) => a.localeCompare(b));
+  return uniqueTags(profiles.flatMap((profile) => profile.tags))
+    .sort((a, b) => tagKey(a).localeCompare(tagKey(b)));
 }
