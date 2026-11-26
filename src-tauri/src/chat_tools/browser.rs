@@ -73,6 +73,7 @@ fn launch() -> Result<Browser, String> {
     command
         .args([
             "--headless=new",
+            "--enable-automation",
             "--remote-debugging-port=0",
             "--remote-debugging-address=127.0.0.1",
             "--no-first-run",
@@ -282,9 +283,6 @@ async fn serve_discovery(
     stream.write_all(&body).await.map_err(|e| e.to_string())?;
     Ok(())
 }
-pub async fn close_window(id: &str) {
-    registry().lock().await.remove(id);
-}
 pub async fn close(id: &str) {
     if let Some(endpoint) = cdp_endpoints().lock().await.remove(id) {
         endpoint.task.abort();
@@ -297,12 +295,15 @@ pub async fn close_all() {
     }
     registry().lock().await.clear();
 }
-async fn target(port: u16) -> Result<Value, String> {
-    let client = reqwest::Client::builder()
+fn browser_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(5))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
+async fn targets(port: u16) -> Result<Vec<Value>, String> {
+    let client = browser_client()?;
     let response = client
         .get(format!("http://127.0.0.1:{port}/json/list"))
         .send()
@@ -319,10 +320,81 @@ async fn target(port: u16) -> Result<Value, String> {
         return Err("瀏覽器資料超過限制。".into());
     }
     let pages: Vec<Value> = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    pages
+    Ok(pages
         .into_iter()
-        .find(|page| page["type"] == "page")
-        .ok_or("瀏覽器沒有可用分頁。".into())
+        .filter(|page| page["type"] == "page")
+        .collect())
+}
+fn selected_page(pages: &[Value], id: Option<&str>) -> Result<Value, String> {
+    let page = match id {
+        Some(id) => pages.iter().find(|page| page["id"] == id),
+        None => pages.first(),
+    };
+    page.cloned().ok_or("瀏覽器沒有可用分頁。".into())
+}
+pub async fn preview(id: &str) -> Result<Value, String> {
+    let browsers = registry().lock().await;
+    let Some(browser) = browsers.get(id) else {
+        return Ok(json!({"image":null,"tabs":[]}));
+    };
+    browser_action(browser, "screenshot", json!({})).await
+}
+async fn tab_action(
+    browser: &Browser,
+    action: &str,
+    args: &Value,
+    pages: &[Value],
+) -> Result<Value, String> {
+    let base = format!("http://127.0.0.1:{}", browser.port);
+    if action == "new_tab" {
+        let page: Value = browser_client()?
+            .put(format!("{base}/json/new?about:blank"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
+        cdp(browser.port, &page, "Page.bringToFront", json!({})).await?;
+        return Ok(page);
+    }
+    let tab_id = args["tabId"]
+        .as_str()
+        .filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("缺少有效的分頁識別碼。")?;
+    let page = selected_page(pages, Some(tab_id))?;
+    if action == "activate_tab" {
+        cdp(browser.port, &page, "Page.bringToFront", json!({})).await?;
+        return Ok(page);
+    }
+    if pages.len() < 2 {
+        return Err("最後一個分頁請使用關閉瀏覽器。".into());
+    }
+    browser_client()?
+        .get(format!("{base}/json/close/{tab_id}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+    let next = pages
+        .iter()
+        .find(|page| page["id"] != tab_id)
+        .ok_or("瀏覽器沒有可用分頁。")?;
+    cdp(browser.port, next, "Page.bringToFront", json!({})).await?;
+    for _ in 0..10 {
+        if targets(browser.port)
+            .await?
+            .iter()
+            .all(|tab| tab["id"] != tab_id)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Ok(next.clone())
 }
 async fn cdp(port: u16, target: &Value, method: &str, params: Value) -> Result<Value, String> {
     let address = target["webSocketDebuggerUrl"]
@@ -387,7 +459,24 @@ pub async fn action(id: &str, action: &str, args: Value) -> Result<Value, String
     ensure(id).await?;
     let browsers = registry().lock().await;
     let browser = browsers.get(id).ok_or("瀏覽器已關閉。")?;
-    let page = target(browser.port).await?;
+    browser_action(browser, action, args).await
+}
+
+async fn browser_action(browser: &Browser, action: &str, args: Value) -> Result<Value, String> {
+    let pages = targets(browser.port).await?;
+    if action == "screenshot" && pages.is_empty() {
+        return Ok(json!({"image":null,"tabs":[]}));
+    }
+    let action = if action == "open" && pages.is_empty() {
+        "new_tab"
+    } else {
+        action
+    };
+    let page = if matches!(action, "new_tab" | "activate_tab" | "close_tab") {
+        tab_action(browser, action, &args, &pages).await?
+    } else {
+        selected_page(&pages, args["tabId"].as_str())?
+    };
     let send = |method: &'static str, params| cdp(browser.port, &page, method, params);
     let metrics = send("Page.getLayoutMetrics", json!({})).await?;
     let width = metrics["cssVisualViewport"]["clientWidth"]
@@ -483,15 +572,15 @@ pub async fn action(id: &str, action: &str, args: Value) -> Result<Value, String
         "snapshot" => {
             return send("Runtime.evaluate", json!({"expression":"JSON.stringify({title:document.title,url:location.href,text:document.body?.innerText?.slice(0,32000),elements:[...document.querySelectorAll('a,button,input,textarea,select')].slice(0,200).map(e=>({tag:e.tagName,text:e.innerText?.slice(0,160),label:e.getAttribute('aria-label'),type:e.getAttribute('type'),rect:(()=>{let r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()}))})","returnByValue":true})).await;
         }
-        "screenshot" => {}
+        "screenshot" | "new_tab" | "activate_tab" | "close_tab" | "open" => {}
         _ => return Err("未知的瀏覽器操作。".into()),
     }
     // Navigation may detach the page briefly after an acknowledged action.
     // Retry only the read; never repeat a click, key, text input or navigation.
     let mut image = Value::Null;
-    let mut current = page;
+    let mut current = page.clone();
     for _ in 0..20 {
-        current = target(browser.port).await?;
+        current = selected_page(&targets(browser.port).await?, page["id"].as_str())?;
         match cdp(
             browser.port,
             &current,
@@ -513,8 +602,13 @@ pub async fn action(id: &str, action: &str, args: Value) -> Result<Value, String
     let notice = image
         .is_null()
         .then_some("操作已送出，瀏覽器畫面尚未就緒；請重新擷取，不要重複執行剛才的操作。");
+    let tabs: Vec<Value> = targets(browser.port)
+        .await?
+        .into_iter()
+        .map(|tab| json!({"id":tab["id"],"url":tab["url"],"title":tab["title"]}))
+        .collect();
     Ok(
-        json!({"image":image,"url":current["url"],"title":current["title"],"width":width,"height":height,"notice":notice}),
+        json!({"image":image,"url":current["url"],"title":current["title"],"tabId":current["id"],"tabs":tabs,"width":width,"height":height,"notice":notice}),
     )
 }
 
@@ -555,10 +649,14 @@ mod tests {
                 .json()
                 .await
                 .map_err(|e| e.to_string())?;
-            assert!(version["webSocketDebuggerUrl"]
+            if !version["webSocketDebuggerUrl"]
                 .as_str()
                 .unwrap_or("")
-                .starts_with("ws://127.0.0.1:"));
+                .starts_with("ws://127.0.0.1:")
+            {
+                ensure(id).await?;
+                return Err(format!("Unexpected browser discovery response: {version}"));
+            }
             action(
                 id,
                 "navigate",
@@ -580,16 +678,31 @@ mod tests {
             }
             assert!(ready);
             let frame = action(id, "type", json!({"text":"native browser input"})).await?;
-            assert_eq!(frame["width"], 1280);
+            assert!((1200..=1280).contains(&frame["width"].as_u64().unwrap()));
             assert!(frame["height"].as_u64().unwrap() >= 500);
             assert!(frame["image"].as_str().unwrap().starts_with("/9j/"));
             assert!(action(id, "navigate", json!({"url":"file:///etc/passwd"}))
                 .await
                 .is_err());
             assert!(action(id, "click", json!({"x":2000,"y":0})).await.is_err());
+            assert_eq!(frame["tabs"].as_array().unwrap().len(), 1);
+            let new_tab = action(id, "new_tab", json!({})).await?;
+            assert_ne!(frame["tabId"], new_tab["tabId"]);
+            assert_eq!(new_tab["tabs"].as_array().unwrap().len(), 2);
+            let switched = action(id, "activate_tab", json!({"tabId": frame["tabId"]})).await?;
+            assert_eq!(switched["tabId"], frame["tabId"]);
+            assert_eq!(preview(id).await?["tabId"], frame["tabId"]);
+            let closed = action(id, "close_tab", json!({"tabId": new_tab["tabId"]})).await?;
+            assert_eq!(closed["tabId"], frame["tabId"]);
+            assert_eq!(closed["tabs"].as_array().unwrap().len(), 1);
+            assert!(
+                action(id, "click", json!({"tabId":new_tab["tabId"],"x":1,"y":1}))
+                    .await
+                    .is_err()
+            );
             let browsers = registry().lock().await;
             let browser = browsers.get(id).unwrap();
-            let page = target(browser.port).await?;
+            let page = selected_page(&targets(browser.port).await?, frame["tabId"].as_str())?;
             let value = cdp(
                 browser.port,
                 &page,

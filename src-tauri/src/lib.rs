@@ -3835,8 +3835,11 @@ async fn chat_browser_action(
     if action == "close" {
         // The next turn resumes native history with the new CDP endpoint.
         registry.close(&thread_id)?;
-        crate::chat_tools::browser::close_window(&thread_id).await;
+        crate::chat_tools::browser::close(&thread_id).await;
         return Ok(serde_json::json!({}));
+    }
+    if action == "preview" {
+        return crate::chat_tools::browser::preview(&thread_id).await;
     }
     crate::chat_tools::browser::action(&thread_id, &action, args).await
 }

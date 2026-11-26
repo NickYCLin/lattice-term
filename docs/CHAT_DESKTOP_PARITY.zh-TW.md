@@ -414,6 +414,9 @@ App Server 是通訊介面依據，不是 LatticeTerm 已接完全部事件的�
   `chat-workspaces/<thread-id>`，不使用使用者家目錄作為隱含專案。
   刪除對話不會順便刪除助理產生的檔案。
 - 新建 Codex 與 Claude Code 對話預設勾選「允許使用瀏覽器」，既有設定保留。
+- 在「對話工具 → LatticeTerm Browser」查看同一個對話專屬瀏覽器的分頁與畫面。
+  助理操作時可觀看；回合結束後可新增、切換或關閉分頁。外部工具只在實際
+  啟用 Chromium 分頁時才會反映到畫面，不會接管個人瀏覽器的登入狀態。
   內嵌畫面與固定版本 `@playwright/mcp@0.0.80` 連到同一個隔離 Chrome／Edge；
   Playwright 需 Node.js，基本工具由對話專屬原生 MCP 橋接提供。
   瀏覽器按需啟動，安裝或連線問題在實際使用工具時回報，不寫 CLI 設定檔。
