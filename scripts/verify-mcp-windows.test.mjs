@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 test("Windows acceptance expects the daemon's complete MCP inventory", () => {
   const daemon = readFileSync(new URL("../src-tauri/src/agent_daemon/mcp.rs", import.meta.url), "utf8");
   const acceptance = readFileSync(new URL("./verify-mcp-windows.mjs", import.meta.url), "utf8");
-  const daemonList = daemon.match(/const TOOL_NAMES: \[&str; \d+\] = \[([\s\S]*?)\];/);
+  const daemonList = daemon.match(/const TOOL_NAMES: &\[&str\] = &\[([\s\S]*?)\];/);
   const acceptanceList = acceptance.match(/assert\.deepEqual\(tools\.tools\.map\(\(tool\) => tool\.name\)\.sort\(\), \[([\s\S]*?)\]\.sort\(\)\);/);
   expect(daemonList).not.toBeNull();
   expect(acceptanceList).not.toBeNull();
