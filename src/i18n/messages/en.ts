@@ -3322,6 +3322,7 @@ export const en: Messages = {
   "chat.tools.openBrowser": "Open browser",
   "chat.tools.newTab": "New tab",
   "chat.tools.closeTab": "Close current tab",
+  "chat.tools.expandBrowser": "Larger preview",
   "chat.tools.computer": "Computer",
   "chat.tools.images": "Image generation",
   "chat.tools.close": "Hide tools",

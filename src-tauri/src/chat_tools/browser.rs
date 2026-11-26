@@ -456,7 +456,13 @@ fn coordinate(args: &Value, name: &str, limit: u64) -> Result<f64, String> {
         .ok_or_else(|| format!("{name} 超出瀏覽器畫面。"))
 }
 pub async fn action(id: &str, action: &str, args: Value) -> Result<Value, String> {
-    ensure(id).await?;
+    if args["inputOnly"] == true {
+        if !matches!(action, "click" | "type" | "key" | "scroll") || !args["tabId"].is_string() {
+            return Err("瀏覽器輸入必須指定分頁及有效操作。".into());
+        }
+    } else {
+        ensure(id).await?;
+    }
     let browsers = registry().lock().await;
     let browser = browsers.get(id).ok_or("瀏覽器已關閉。")?;
     browser_action(browser, action, args).await
@@ -548,6 +554,11 @@ async fn browser_action(browser: &Browser, action: &str, args: Value) -> Result<
                 "Tab" => 9,
                 "Escape" => 27,
                 "Backspace" => 8,
+                "Delete" => 46,
+                "Home" => 36,
+                "End" => 35,
+                "PageUp" => 33,
+                "PageDown" => 34,
                 "ArrowDown" => 40,
                 "ArrowUp" => 38,
                 "ArrowLeft" => 37,
@@ -563,9 +574,25 @@ async fn browser_action(browser: &Browser, action: &str, args: Value) -> Result<
                 .as_f64()
                 .filter(|delta| delta.is_finite() && delta.abs() <= 2400.0)
                 .ok_or("捲動量超過限制。")?;
+            let delta_x = if args["deltaX"].is_null() {
+                0.0
+            } else {
+                args["deltaX"]
+                    .as_f64()
+                    .filter(|delta| delta.is_finite() && delta.abs() <= 2400.0)
+                    .ok_or("捲動量超過限制。")?
+            };
+            let (x, y) = if args["x"].is_null() && args["y"].is_null() {
+                (width as f64 / 2.0, height as f64 / 2.0)
+            } else {
+                (
+                    coordinate(&args, "x", width)?,
+                    coordinate(&args, "y", height)?,
+                )
+            };
             send(
                 "Input.dispatchMouseEvent",
-                json!({"type":"mouseWheel","x":width / 2,"y":height / 2,"deltaX":0,"deltaY":delta}),
+                json!({"type":"mouseWheel","x":x,"y":y,"deltaX":delta_x,"deltaY":delta}),
             )
             .await?;
         }
@@ -574,6 +601,9 @@ async fn browser_action(browser: &Browser, action: &str, args: Value) -> Result<
         }
         "screenshot" | "new_tab" | "activate_tab" | "close_tab" | "open" => {}
         _ => return Err("未知的瀏覽器操作。".into()),
+    }
+    if args["inputOnly"] == true {
+        return Ok(Value::Null);
     }
     // Navigation may detach the page briefly after an acknowledged action.
     // Retry only the read; never repeat a click, key, text input or navigation.
@@ -615,6 +645,19 @@ async fn browser_action(browser: &Browser, action: &str, args: Value) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn preview_input_does_not_start_closed_browser() {
+        let id = "test-browser-input-without-session";
+        assert!(action(
+            id,
+            "type",
+            json!({"inputOnly":true,"tabId":"A","text":"test"})
+        )
+        .await
+        .is_err());
+        assert!(!registry().lock().await.contains_key(id));
+    }
+
     #[tokio::test]
     #[ignore = "Requires local Chrome; uses only a synthetic loopback page"]
     async fn embedded_browser_navigates_types_and_shares_its_actual_frame() {
@@ -685,6 +728,20 @@ mod tests {
                 .await
                 .is_err());
             assert!(action(id, "click", json!({"x":2000,"y":0})).await.is_err());
+            assert!(action(
+                id,
+                "scroll",
+                json!({"tabId":frame["tabId"],"inputOnly":true,"x":5,"y":5,"delta":50,"deltaX":10})
+            )
+            .await?
+            .is_null());
+            assert!(action(
+                id,
+                "scroll",
+                json!({"tabId":frame["tabId"],"inputOnly":true,"x":5000,"y":5,"delta":50})
+            )
+            .await
+            .is_err());
             assert_eq!(frame["tabs"].as_array().unwrap().len(), 1);
             let new_tab = action(id, "new_tab", json!({})).await?;
             assert_ne!(frame["tabId"], new_tab["tabId"]);

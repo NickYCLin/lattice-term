@@ -3235,6 +3235,7 @@ export const zhTW = {
   "chat.tools.openBrowser": "開啟瀏覽器",
   "chat.tools.newTab": "新增分頁",
   "chat.tools.closeTab": "關閉目前分頁",
+  "chat.tools.expandBrowser": "放大預覽",
   "chat.tools.computer": "電腦控制",
   "chat.tools.images": "圖片生成",
   "chat.tools.close": "收起工具",

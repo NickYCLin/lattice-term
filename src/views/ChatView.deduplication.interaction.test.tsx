@@ -19,6 +19,7 @@ it("shows assistant-created browser tabs without starting a browser and gates ma
   const tabs = [{ id: "A", url: "https://example.com", title: "First page" }, { id: "B", url: "https://example.org", title: "Second page" }];
   vi.mocked(invoke).mockImplementation(async (name, args) => {
     if (name !== "chat_browser_action") return {};
+    if (args && "args" in args && (args.args as { inputOnly?: boolean } | undefined)?.inputOnly) return null;
     const tab = args && "action" in args && args.action === "activate_tab" ? tabs[0] : tabs[1];
     return { ...tab, tabId: tab.id, tabs, image: "frame", width: 1280, height: 800 };
   });
@@ -33,6 +34,29 @@ it("shows assistant-created browser tabs without starting a browser and gates ma
     await act(async () => props(tabButton("First page")).onClick());
     expect(invoke).toHaveBeenCalledWith("chat_browser_action", { threadId: "t1", action: "activate_tab", args: { tabId: "A" } });
     expect(props(tabButton("First page"))["aria-pressed"]).toBe(true);
+    await act(async () => props(tabButton("放大預覽")).onClick());
+    expect(props(tabButton("放大預覽"))["aria-pressed"]).toBe(true);
+    const screen = allNodes(host).find(node => node.tagName === "IMG")!;
+    const pressed = (key: string) => props(screen).onKeyDown({ key, nativeEvent: {}, preventDefault: vi.fn() });
+    await act(async () => {
+      pressed("A");
+      pressed("b");
+      pressed("Delete");
+      props(screen).onPaste({ clipboardData: { getData: () => "測試" }, preventDefault: vi.fn() });
+    });
+    const inputs = vi.mocked(invoke).mock.calls.flatMap(([, args]) => {
+      if (!args || !("args" in args) || !(args.args as { inputOnly?: boolean } | undefined)?.inputOnly) return [];
+      return [["action" in args ? args.action : undefined, args.args]];
+    });
+    expect(inputs).toEqual([
+      ["type", { tabId: "A", inputOnly: true, text: "A" }],
+      ["type", { tabId: "A", inputOnly: true, text: "b" }],
+      ["key", { tabId: "A", inputOnly: true, key: "Delete" }],
+      ["type", { tabId: "A", inputOnly: true, text: "測試" }],
+    ]);
+    await act(async () => render(true));
+    await act(async () => pressed("x"));
+    expect(invoke).not.toHaveBeenCalledWith("chat_browser_action", expect.objectContaining({ args: expect.objectContaining({ text: "x" }) }));
   } finally {
     await act(async () => root.unmount());
     restore();

@@ -1280,6 +1280,7 @@ export function ThreadPane({
       {latestGoal?.type === "goal" && <GoalProgress goal={latestGoal.goal} compact />}
       {statusOpen && <ChatStatus model={thread.model} directory={thread.workingDirectory} context={runtimeStatus?.contextUsage} rateLimits={runtimeStatus?.rateLimits}
         state={t(running ? "agents.state.working" : "agents.state.idle")} onClose={() => setStatusOpen(false)} />}
+      <div className={`chat-workspace${toolsOpen ? " chat-workspace--tools" : ""}`}>
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onWheel={onWheel}>
         <div className="chat-messages__inner">
           {(nativeRead || (thread.nativeHistorySource && !chat.historyReady)) && <ConversationReadProgress loading={Boolean(nativeRead?.loading) || Boolean(thread.nativeHistorySource && !chat.historyReady && !nativeRead?.error && !nativeRead?.ready)} error={nativeRead?.error} diagnostics={nativeRead?.diagnostics} onRetry={nativeRead?.refresh} />}
@@ -1357,6 +1358,9 @@ export function ThreadPane({
         </div>
       </div>
 
+      {toolsOpen && <ChatTools key={thread.id} threadId={thread.id} directory={thread.workingDirectory} busy={running || Boolean(thread.pendingOperation)} assistantTools={!directProxy && ["codex", "claude"].includes(thread.definitionId)} browserEnabled={thread.browserEnabled === true} onClose={() => setToolsOpen(false)} />}
+      </div>
+
       {!thread.archived && (
         <ChatDelegations
           thread={thread}
@@ -1368,7 +1372,6 @@ export function ThreadPane({
           onInsert={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
         />
       )}
-      {toolsOpen && <ChatTools key={thread.id} threadId={thread.id} directory={thread.workingDirectory} busy={running || Boolean(thread.pendingOperation)} assistantTools={!directProxy && ["codex", "claude"].includes(thread.definitionId)} browserEnabled={thread.browserEnabled === true} onClose={() => setToolsOpen(false)} />}
       {changesOpen && !thread.archived && thread.workingDirectory && (
         <ChatChangesPanel
           workingDirectory={thread.workingDirectory}
