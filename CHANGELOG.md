@@ -4,6 +4,29 @@
 
 ---
 
+## [2026.11.26](https://github.com/NickYCLin/lattice-term/compare/v2026.11.19...v2026.11.26) (2026-11-26)
+
+
+### 🚀 新增功能
+
+* 在 Windows 設定中管理本機儲存空間 ([349470c](https://github.com/NickYCLin/lattice-term/commit/349470c9264d15d2c2f4f0c0c5b733bb2e6d2135))
+* 為 AI 遠端加入 Linux SSH sudo ([22858c5](https://github.com/NickYCLin/lattice-term/commit/22858c58c62d51c4ccd287cb8f7670b1a66066cb))
+* 讓 Windows 對話共用獨立的沙箱桌面 ([b37c431](https://github.com/NickYCLin/lattice-term/commit/b37c431f6b01e5b5e2cde29ad84977ed5a32518e))
+
+
+### 🛠️ 問題修正
+
+* 保留舊版 Kimi 工作目錄索引格式 ([56083e7](https://github.com/NickYCLin/lattice-term/commit/56083e70810215f48d4e7f9ab41bf3f3c32491d7))
+* 保留連線標籤的大小寫 ([4378ed1](https://github.com/NickYCLin/lattice-term/commit/4378ed1c230e6e4d1661358c7eef052fc80dc281))
+* 修正發布檢查的 MCP 工具清單比對 ([9d285e6](https://github.com/NickYCLin/lattice-term/commit/9d285e655ac87119176bfc155b4acced272e42eb))
+* 修正終端字元掃描的 Clippy 錯誤 ([4d3335e](https://github.com/NickYCLin/lattice-term/commit/4d3335ee40e7976b69ff661f1b1baf84bdddafc2))
+* 側欄優先顯示遠端主機名稱 ([5e65239](https://github.com/NickYCLin/lattice-term/commit/5e65239d7b1f768e137fb7eec250dac50d1947d5))
+* 拉開設定欄位間距並置中勾號 ([2a1c420](https://github.com/NickYCLin/lattice-term/commit/2a1c420edc3ce14a8ae4bbdce367b92b0502e041))
+* 用量更新失敗時清除過期的操作清單 ([50d28c2](https://github.com/NickYCLin/lattice-term/commit/50d28c2bd15002b173dd3da099cc33c5ab3f1032))
+* 補列已封存與未分日期存放的 Codex 紀錄 ([b2c3638](https://github.com/NickYCLin/lattice-term/commit/b2c36386bf16911732f7f8264e481e204f320ea7))
+* 避免自動送出 /exit 並讓結束的工作階段可接續 ([85ef317](https://github.com/NickYCLin/lattice-term/commit/85ef317de5a064fc7fc4555293d4eae6fabfd726))
+* 預設關閉 Codex 自動放手 ([834a6a9](https://github.com/NickYCLin/lattice-term/commit/834a6a989747fb174e30535de69295c811d73de6))
+
 ## [2026.11.19](https://github.com/NickYCLin/lattice-term/compare/v2026.11.18...v2026.11.19) (2026-11-18)
 
 
