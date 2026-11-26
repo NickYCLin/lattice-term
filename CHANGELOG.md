@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.11.27](https://github.com/NickYCLin/lattice-term/compare/v2026.11.26...v2026.11.27) (2026-11-26)
+
+
+### 🚀 新增功能
+
+* **browser:** 加入並排預覽與直接網頁輸入 ([eba87c1](https://github.com/NickYCLin/lattice-term/commit/eba87c119fbde606144293b044a1198f1e40f554))
+* **browser:** 加入助理共用的瀏覽器分頁面板 ([1d618e0](https://github.com/NickYCLin/lattice-term/commit/1d618e0df65b4a61051eee3ac69a201c608a9d58))
+
 ## [2026.11.26](https://github.com/NickYCLin/lattice-term/compare/v2026.11.19...v2026.11.26) (2026-11-26)
 
 
