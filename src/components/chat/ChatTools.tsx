@@ -30,26 +30,38 @@ export function ChatTools({ threadId, directory, busy, assistantTools, browserEn
   const wheelHandler = useRef<(event: WheelEvent) => void>(() => {});
   const browserInput = useRef<Promise<void>>(Promise.resolve());
   const pendingInput = useRef(0);
+  const previewRevision = useRef(0);
   const browserBusy = useRef(busy); browserBusy.current = busy;
   const mounted = useRef(true); const lock = useRef(false); const frameRef = useRef(frames); frameRef.current = frames;
   useEffect(() => { mounted.current = true; void invoke<{ computer: boolean; isolated: boolean; images: boolean; imageSource?: { proxyId: string; model: string } | null }>("chat_tools_status", { threadId }).then(status => { if (mounted.current) { setIsolated(status.isolated === true); setComputer(status.computer); setConfigured(status.images); if (status.imageSource) { setProxyId(status.imageSource.proxyId); setModel(status.imageSource.model); } } }).catch(() => {}); return () => { mounted.current = false; }; }, [threadId]);
   useEffect(() => { if (isolated !== false) return; const stopComputer = () => { setComputer(false); setFrames(current => ({ ...current, computer: undefined })); void invoke("chat_computer_enable", { threadId, enabled: false }).catch(() => {}); }; window.addEventListener("focus", stopComputer); return () => window.removeEventListener("focus", stopComputer); }, [threadId, isolated]);
-  async function act(action: () => Promise<void>, quiet = false) {
-    if (lock.current || pendingInput.current) return; lock.current = true; setWorking(true); if (!quiet) { setError(""); setNotice(""); }
+  async function act(action: () => Promise<void>) {
+    if (lock.current || pendingInput.current) return;
+    lock.current = true; previewRevision.current++; setWorking(true); setError(""); setNotice("");
     try { await action(); } catch (reason) { if (mounted.current) setError(String(reason)); } finally { lock.current = false; if (mounted.current) setWorking(false); }
   }
   async function command(target: "browser" | "computer", action: string, args: Record<string, unknown> = {}) {
-    const tabId = target === "browser" && action !== "preview" ? frameRef.current.browser?.tabId : undefined;
+    const tabId = target === "browser" ? frameRef.current.browser?.tabId : undefined;
     const frame = await invoke<Frame>(target === "browser" ? "chat_browser_action" : "chat_computer_action", { threadId, action, args: { tabId, ...args, ...(target === "computer" && action !== "capture" ? { fingerprint: frameRef.current.computer?.fingerprint } : {}) } });
     if (!mounted.current || !frame) return;
-    if (frame.notice && action !== "preview") setNotice(frame.notice);
+    if (frame.notice) setNotice(frame.notice);
     if (target === "browser" || frame.image) setFrames(current => ({ ...current, [target]: frame }));
     if (target === "browser" && ["navigate", "back", "forward", "open", "new_tab", "activate_tab", "close_tab"].includes(action)) setUrlDraft(null);
   }
   useEffect(() => {
     if (tab !== "browser") return;
     let active = true; let timer: ReturnType<typeof setTimeout>;
-    async function refresh() { await act(() => command("browser", "preview"), true); if (active) timer = setTimeout(() => void refresh(), 1500); }
+    async function refresh() {
+      try {
+        if (lock.current || pendingInput.current) return;
+        const revision = previewRevision.current;
+        const frame = await invoke<Frame>("chat_browser_action", { threadId, action: "preview", args: {} }).catch(() => null);
+        if (!active || !frame || revision !== previewRevision.current) return;
+        setFrames(current => ({ ...current, browser: frame }));
+      } finally {
+        if (active) timer = setTimeout(() => void refresh(), 1500);
+      }
+    }
     void refresh(); return () => { active = false; clearTimeout(timer); };
   }, [tab, threadId]);
   const frame = tab === "images" ? undefined : frames[tab];
@@ -57,9 +69,10 @@ export function ChatTools({ threadId, directory, busy, assistantTools, browserEn
   const url = urlDraft ?? (frames.browser?.url === "about:blank" ? "" : frames.browser?.url ?? "");
   const unavailable = busy || working || (tab === "browser" ? !frame?.tabId : !computer);
   function queueBrowserInput(action: string, args: Record<string, unknown>) {
-    if (pendingInput.current >= 64 || !frame?.tabId) return;
+    if (lock.current || pendingInput.current >= 64 || !frame?.tabId) return;
     const tabId = frame.tabId;
     pendingInput.current++;
+    previewRevision.current++;
     browserInput.current = browserInput.current.then(async () => {
       if (!mounted.current || browserBusy.current || frameRef.current.browser?.tabId !== tabId) return;
       await command("browser", action, { ...args, tabId, inputOnly: true });
