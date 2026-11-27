@@ -152,6 +152,71 @@ fn filenames(directory: &Path) -> BTreeSet<String> {
 
 #[tokio::test]
 #[ignore = "Requires local OpenSSH sftp-server; CI runs openssh_ tests explicitly"]
+async fn openssh_mcp_upload_batch_resumes_and_preserves_existing_files() {
+    crate::sftp_test_server::bounded(async {
+        let fixture = Fixture::start(None).await;
+        std::fs::write(fixture.local.path().join("source"), b"new").unwrap();
+        std::fs::write(fixture.remote.join("different"), b"old").unwrap();
+        std::os::unix::fs::symlink(
+            fixture.remote.join("different"),
+            fixture.remote.join("link"),
+        )
+        .unwrap();
+        let batch = |request: &str| DesktopOperation::UploadBatch {
+            target_id: fixture.target.id.clone(),
+            root_id: "workspace".into(),
+            request_id: request.into(),
+            files: [
+                ("source", "first"),
+                ("source", "different"),
+                ("source", "link"),
+                ("later", "later"),
+            ]
+            .into_iter()
+            .map(|(local_path, remote_path)| BatchUploadFile {
+                local_path: local_path.into(),
+                remote_path: remote_path.into(),
+            })
+            .collect(),
+        };
+        let first = fixture.run(batch("batch-first")).await.unwrap();
+        assert_eq!(first["state"], "partial");
+        assert_eq!(first["results"][0]["state"], "uploaded");
+        assert_eq!(first["results"][1]["state"], "conflict");
+        assert_eq!(first["results"][2]["state"], "conflict");
+        assert_eq!(first["results"][3]["state"], "failed");
+        let replay = fixture.run(batch("batch-first")).await.unwrap();
+        assert_eq!(replay["operationId"], first["operationId"]);
+        assert_eq!(replay["results"], first["results"]);
+        assert_eq!(
+            fixture
+                .service
+                .list_operations("client", &fixture.target.id)
+                .unwrap()["operations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        std::fs::write(fixture.local.path().join("later"), b"later").unwrap();
+        let resumed = fixture.run(batch("batch-resume")).await.unwrap();
+        assert_eq!(resumed["results"][0]["state"], "alreadyPresent");
+        assert_eq!(resumed["results"][3]["state"], "uploaded");
+        assert_eq!(
+            std::fs::read(fixture.remote.join("different")).unwrap(),
+            b"old"
+        );
+        assert_eq!(
+            std::fs::read(fixture.remote.join("later")).unwrap(),
+            b"later"
+        );
+        fixture.close().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires local OpenSSH sftp-server; CI runs openssh_ tests explicitly"]
 async fn openssh_mcp_text_pages_search_and_revocation() {
     crate::sftp_test_server::bounded(async {
         let fixture = Fixture::start(None).await;

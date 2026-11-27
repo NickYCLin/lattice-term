@@ -382,6 +382,7 @@ Git、記憶交接或日誌。舊背景服務會要求更新，不會降級繞�
 | `remote_file_transfer` | Lattice Remote 單檔上傳／下載，沿用 Remote 確認設定，不覆寫同名檔 |
 | `rdp_stage_file` | Windows 客戶端的 RDP 部署暫存，需 upload scope 與逐檔桌面核准；提供唯讀 tsclient 路徑與 SHA-256，不代表已複製或部署到遠端，詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md) |
 | `sftp_transfer` | 核准本機／遠端目錄之間的單檔傳送 |
+| `sftp_upload_batch` | 在同一組核准根目錄批次上傳，每批只占一筆操作紀錄，不覆寫 |
 | `get_remote_operation` | 查詢此 client 的操作結果，無重跑副作用 |
 | `cancel_remote_operation` | 要求中止此 client 的操作，不關閉使用者 SSH 工作階段 |
 
@@ -409,6 +410,10 @@ offset 必須落在 UTF-8 字元邊界；不接受 NUL 或無效 UTF-8。
 指令／傳檔先回 `operationId` 與 running，client 必須再查結果。指令分別保存 stdout、stderr、exit status／signal、截斷與逾時，輸出合計最多 32 KiB，UI 固定指令上限 30 秒（後端上限 60 秒）。結束通道不代表全部遠端衍生程序已停止，也不會回復先前寫入；不可把 `accepted` 或 EOF 當成 exit 0。相同 client／request ID 的重送不重跑，最多保存 256 筆／15 分鐘；失聯或超時可能結果未確認，不得改用新 ID 盲目重送。
 
 桌面 Rust service 持有 registry 與原始授權，daemon 僅定向轉送到擁有它的桌面連線，兩端檢查權限。握手確認 `desktopBridgeProtocol` 後才送新請求，舊服務不會收到不認得的管理指令。MCP 不能註冊桌面 bridge、核准自己的權限或提交任意 Tauri command。
+
+批次上傳需要同一 SFTP 連線的上傳及下載權限，因為續跑時會讀取目的檔比對內容，但不會回傳檔案內容。指定 `targetId`、`rootId`、`requestId` 與 `files`（每項包含 `localPath`、`remotePath`）。每批 1～64 檔，每檔最多 8 MiB；每筆路徑是核准根目錄下的相對路徑，最多 2048 UTF-8 bytes，目的目錄必須已存在。批次依序執行，每檔最多 60 秒、每批最多 5 分鐘，不會回復已完成檔案。
+
+用 `get_remote_operation` 或 `wait_remote_operation` 查看 `results`，`index` 從 0 開始，對應原始清單。`uploaded` 表示上傳成功，`alreadyPresent` 表示已逐位元組確認內容相同，`conflict` 表示既有檔不同或不是一般檔案，`failed` 或 `unknown` 表示失敗或結果未確認。整批 `partial` 不等於全數成功；請一併看 `unattempted` 和 `stopReason`。撤銷分享後無法查詢原操作。送出後未收到回覆時用原 `requestId` 查回同一批；確認原批已停止，或重新連線後，才能用新 ID 續跑。可重送原清單核對目的端：相同檔會略過、不同檔會保留，不會只靠名稱或大小判定。
 
 `get_capabilities.backends` 分別列出 `agentFleetBackground` 與 `desktopSshSftp`。後者的 `supported` 表示服務支援橋接協定，`available` 還需要至少一個已授權且連線中的目標；不能把服務版本支援當成目前已獲得主機權限。
 

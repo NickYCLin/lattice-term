@@ -1667,7 +1667,7 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
         Op::ExecCommand { .. } | Op::ExecSudo { .. } | Op::RemoteCommand { .. } => {
             audit::Action::RemoteCommand
         }
-        Op::RdpStageFile { .. } => audit::Action::RemoteUpload,
+        Op::RdpStageFile { .. } | Op::UploadBatch { .. } => audit::Action::RemoteUpload,
         Op::Transfer {
             direction: TransferDirection::Upload,
             ..

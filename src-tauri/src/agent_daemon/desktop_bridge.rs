@@ -288,10 +288,7 @@ impl Bridge {
                         .iter()
                         .find(|t| t.id == target_id)
                         .ok_or("Remote grant unavailable")?;
-                    if operation
-                        .required_scope()
-                        .is_some_and(|scope| !target.scopes.allows(scope))
-                    {
+                    if !operation.scopes_allow(&target.scopes) {
                         return Err("This remote operation is not authorized".into());
                     }
                     if !target.connected {
