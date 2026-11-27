@@ -214,6 +214,15 @@ pub enum TransferDirection {
     Download,
 }
 
+pub(crate) const MAX_BATCH_UPLOAD_FILES: usize = 64;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BatchUploadFile {
+    local_path: String,
+    remote_path: String,
+}
+
 /// The most entries the connection book will describe in one reply, so a
 /// large book cannot turn one call into an unbounded payload.
 const MAX_BOOK_ENTRIES: usize = 500;
@@ -380,6 +389,12 @@ pub enum DesktopOperation {
         remote_path: String,
         request_id: String,
     },
+    UploadBatch {
+        target_id: String,
+        root_id: String,
+        files: Vec<BatchUploadFile>,
+        request_id: String,
+    },
     Cancel {
         target_id: String,
         operation_id: String,
@@ -421,6 +436,7 @@ impl DesktopOperation {
         "remoteFileTransfer",
         "rdpStageFile",
         "transfer",
+        "uploadBatch",
         "cancel",
         "operationStatus",
         "listOperations",
@@ -464,6 +480,7 @@ impl DesktopOperation {
             Self::RemoteFileTransfer { .. } => "remoteFileTransfer",
             Self::RdpStageFile { .. } => "rdpStageFile",
             Self::Transfer { .. } => "transfer",
+            Self::UploadBatch { .. } => "uploadBatch",
             Self::Cancel { .. } => "cancel",
             Self::OperationStatus { .. } => "operationStatus",
             Self::ListOperations { .. } => "listOperations",
@@ -493,6 +510,7 @@ impl DesktopOperation {
             | Self::RemoteFileTransfer { target_id, .. }
             | Self::RdpStageFile { target_id, .. }
             | Self::Transfer { target_id, .. }
+            | Self::UploadBatch { target_id, .. }
             | Self::Cancel { target_id, .. }
             | Self::ListOperations { target_id }
             | Self::OperationStatus { target_id, .. } => Some(target_id),
@@ -513,6 +531,7 @@ impl DesktopOperation {
             Self::ExecCommand { .. } | Self::ExecSudo { .. } => Some(Scope::Command),
             Self::RemoteCommand { .. } => Some(Scope::Command),
             Self::RdpStageFile { .. } => Some(Scope::Upload),
+            Self::UploadBatch { .. } => Some(Scope::Upload),
             Self::Transfer {
                 direction: TransferDirection::Upload,
                 ..
@@ -541,6 +560,12 @@ impl DesktopOperation {
         }
     }
 
+    pub(crate) fn scopes_allow(&self, scopes: &Scopes) -> bool {
+        self.required_scope()
+            .is_none_or(|scope| scopes.allows(scope))
+            && (!matches!(self, Self::UploadBatch { .. }) || scopes.allows(Scope::Download))
+    }
+
     fn request_id(&self) -> Option<&str> {
         match self {
             Self::DesktopAgent { action, .. } => action.request_id(),
@@ -555,6 +580,7 @@ impl DesktopOperation {
             | Self::RemoteFileTransfer { request_id, .. }
             | Self::RdpStageFile { request_id, .. }
             | Self::Transfer { request_id, .. }
+            | Self::UploadBatch { request_id, .. }
             | Self::Cancel { request_id, .. } => Some(request_id),
             _ => None,
         }
@@ -1688,11 +1714,7 @@ impl DesktopService {
             return Err(ServiceError::new("not_authorized",
                 "此工作階段已共享，但未開啟控制（fleetControl）。請到「AI Agent Fleet」，將該工作階段的「MCP 權限」設為「完全開放（可看、送指示、停止）」，再重新取得 targetId。"));
         }
-        if *grant.revoked.borrow()
-            || operation
-                .required_scope()
-                .is_some_and(|scope| !grant.view.scopes.allows(scope))
-        {
+        if *grant.revoked.borrow() || !operation.scopes_allow(&grant.view.scopes) {
             return Err(ServiceError::denied());
         }
         if !self.connected(grant) {
@@ -1786,6 +1808,7 @@ impl DesktopService {
                 | DesktopOperation::RemoteFileTransfer { .. }
                 | DesktopOperation::RdpStageFile { .. }
                 | DesktopOperation::Transfer { .. }
+                | DesktopOperation::UploadBatch { .. }
         ) {
             let mut lease = lease.ok_or_else(ServiceError::invalid)?;
             let permit = match Arc::clone(&self.calls).try_acquire_owned() {
@@ -1958,6 +1981,17 @@ impl DesktopService {
                     return Err(ServiceError::denied());
                 }
                 paths::preflight_transfer(local_path, remote_path)?;
+            }
+            DesktopOperation::UploadBatch { root_id, files, .. } => {
+                if grant.view.backend != Backend::Sftp
+                    || !grant
+                        .roots
+                        .iter()
+                        .any(|root| root.id == *root_id && root.has_local())
+                {
+                    return Err(ServiceError::denied());
+                }
+                paths::preflight_upload_batch(files)?;
             }
             DesktopOperation::Cancel { operation_id, .. }
             | DesktopOperation::OperationStatus { operation_id, .. } => {
@@ -2330,6 +2364,22 @@ impl DesktopService {
                         json!({ "operationId": lease.id, "state": "completed", "bytes": result["count"], "sha256": result["sha256"], "overwrite": false, "permissionNotice": result["permissionNotice"] }),
                     )
                 }
+                DesktopOperation::UploadBatch { root_id, files, .. } => {
+                    let root = grant
+                        .roots
+                        .iter()
+                        .find(|root| root.id == *root_id)
+                        .ok_or_else(ServiceError::denied)?;
+                    paths::upload_batch(
+                        &self.sftp,
+                        &grant.session_id,
+                        root,
+                        files,
+                        grant.revoked.subscribe(),
+                        lease.ok_or_else(ServiceError::invalid)?,
+                    )
+                    .await
+                }
                 _ => Err(ServiceError::invalid()),
             }
         };
@@ -2343,6 +2393,7 @@ impl DesktopService {
                 | DesktopOperation::RemoteCommand { .. }
                 | DesktopOperation::RemoteFileTransfer { .. }
                 | DesktopOperation::RdpStageFile { .. }
+                | DesktopOperation::UploadBatch { .. }
         ) {
             return work.await;
         }
@@ -3398,6 +3449,15 @@ mod tests {
                 target_id: "t".into(),
                 operation_id: "o".into(),
                 request_id: "q".into(),
+            },
+            DesktopOperation::UploadBatch {
+                target_id: "t".into(),
+                root_id: "r".into(),
+                files: vec![BatchUploadFile {
+                    local_path: "source".into(),
+                    remote_path: "dest".into(),
+                }],
+                request_id: "batch".into(),
             },
             DesktopOperation::OperationStatus {
                 target_id: "t".into(),

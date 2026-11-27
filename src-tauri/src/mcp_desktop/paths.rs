@@ -2,7 +2,10 @@
 //! Checks are repeated immediately before publication. SFTP v3 has no openat
 //! directory capabilities: server-side chroot is required for hostile races.
 
-use super::{sha256, RootRequest, ServiceError, TransferDirection};
+use super::{
+    cancelled, sha256, BatchUploadFile, OperationLease, RootRequest, ServiceError,
+    TransferDirection, MAX_BATCH_UPLOAD_FILES,
+};
 use crate::sftp::SftpRegistry;
 use base64::Engine;
 use russh_sftp::client::SftpSession;
@@ -21,6 +24,12 @@ pub(super) struct Root {
     pub id: String,
     pub(super) remote: String,
     local: Option<PathBuf>,
+}
+
+impl Root {
+    pub(super) fn has_local(&self) -> bool {
+        self.local.is_some()
+    }
 }
 
 fn path_error() -> ServiceError {
@@ -128,6 +137,26 @@ pub(super) fn preflight_transfer(local: &str, remote: &str) -> Result<(), Servic
         .any(|component| !valid_local_name(component))
     {
         return Err(path_error());
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_upload_batch(files: &[BatchUploadFile]) -> Result<(), ServiceError> {
+    if files.is_empty() || files.len() > MAX_BATCH_UPLOAD_FILES {
+        return Err(ServiceError::invalid());
+    }
+    let mut destinations = std::collections::HashSet::new();
+    for file in files {
+        preflight_transfer(&file.local_path, &file.remote_path)?;
+        if relative_components(&file.remote_path, false)?
+            .iter()
+            .any(|component| component.trim() != *component)
+        {
+            return Err(path_error());
+        }
+        if !destinations.insert(&file.remote_path) {
+            return Err(ServiceError::invalid());
+        }
     }
     Ok(())
 }
@@ -458,6 +487,172 @@ pub(super) async fn transfer(
     revoked: watch::Receiver<bool>,
     cancel: watch::Receiver<bool>,
 ) -> Result<Value, ServiceError> {
+    transfer_file(
+        registry,
+        session_id,
+        root,
+        direction,
+        local_relative,
+        remote_relative,
+        revoked,
+        cancel,
+        false,
+    )
+    .await
+}
+
+pub(super) async fn upload_batch(
+    registry: &SftpRegistry,
+    session_id: &str,
+    root: &Root,
+    files: &[BatchUploadFile],
+    mut revoked: watch::Receiver<bool>,
+    lease: &OperationLease,
+) -> Result<Value, ServiceError> {
+    let mut cancel = lease.cancel.subscribe();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+    let mut results = Vec::with_capacity(files.len());
+    let mut stopped = None;
+    for (index, file) in files.iter().enumerate() {
+        if *revoked.borrow() {
+            return Err(ServiceError::denied());
+        }
+        if *cancel.borrow() || tokio::time::Instant::now() >= deadline {
+            stopped = Some(if *cancel.borrow() {
+                "cancelled"
+            } else {
+                "timed_out"
+            });
+            break;
+        }
+        let transfer = transfer_file(
+            registry,
+            session_id,
+            root,
+            TransferDirection::Upload,
+            &file.local_path,
+            &file.remote_path,
+            revoked.clone(),
+            cancel.clone(),
+            true,
+        );
+        let file_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(60));
+        let outcome = tokio::select! {
+            biased;
+            _ = cancelled(&mut revoked) => return Err(ServiceError::denied()),
+            _ = cancelled(&mut cancel) => {
+                stopped = Some("cancelled");
+                Err(ServiceError::new("unknown_outcome", "Cancelled during transfer."))
+            }
+            result = tokio::time::timeout_at(file_deadline, transfer) => match result {
+                Ok(result) => result,
+                Err(_) => {
+                    stopped = Some("timed_out");
+                    Err(ServiceError::new("unknown_outcome", "The transfer deadline elapsed."))
+                }
+            },
+        };
+        let result = match outcome {
+            Ok(value) => json!({
+                "index": index,
+                "state": if value["alreadyPresent"] == true { "alreadyPresent" } else { "uploaded" },
+                "bytes": value["count"], "sha256": value["sha256"],
+                "permissionWarning": value["permissionNotice"].is_string(),
+            }),
+            Err(error) => {
+                let state = match error.code.as_str() {
+                    "file_conflict" => "conflict",
+                    "path_not_allowed" | "file_too_large" => "failed",
+                    "not_authorized" => return Err(error),
+                    "unknown_outcome" => {
+                        stopped.get_or_insert("unknown_outcome");
+                        "unknown"
+                    }
+                    _ => {
+                        stopped.get_or_insert("transfer_failed");
+                        "failed"
+                    }
+                };
+                json!({ "index": index, "state": state, "code": error.code })
+            }
+        };
+        results.push(result);
+        if stopped.is_some() {
+            break;
+        }
+        lease.publish_progress(
+            json!({ "state": "running", "total": files.len(), "results": results }),
+        );
+    }
+    let state = if stopped.is_some()
+        || results.iter().any(|result| {
+            !matches!(
+                result["state"].as_str(),
+                Some("uploaded" | "alreadyPresent")
+            )
+        }) {
+        "partial"
+    } else {
+        "completed"
+    };
+    Ok(json!({
+        "state": state, "total": files.len(), "results": results,
+        "unattempted": files.len() - results.len(), "stopReason": stopped,
+    }))
+}
+
+async fn check_existing_upload(
+    session: &SftpSession,
+    root: &Root,
+    relative: &str,
+    destination: &str,
+    bytes: &[u8],
+) -> Result<bool, ServiceError> {
+    let attrs = match session.symlink_metadata(destination).await {
+        Ok(attrs) => attrs,
+        Err(russh_sftp::client::error::Error::Status(status))
+            if status.status_code == russh_sftp::protocol::StatusCode::NoSuchFile =>
+        {
+            return Ok(false)
+        }
+        Err(_) => return Err(ServiceError::failed()),
+    };
+    if !attrs.file_type().is_file() || attrs.len() != bytes.len() as u64 {
+        return Err(conflict());
+    }
+    let remote = check_remote(session, &root.remote, relative, false).await?;
+    let file = session
+        .open(remote)
+        .await
+        .map_err(|_| ServiceError::failed())?;
+    let opened = file.metadata().await.map_err(|_| ServiceError::failed())?;
+    if !opened.file_type().is_file() || opened.len() != bytes.len() as u64 {
+        return Err(conflict());
+    }
+    let mut existing = Vec::new();
+    file.take(bytes.len() as u64 + 1)
+        .read_to_end(&mut existing)
+        .await
+        .map_err(|_| ServiceError::failed())?;
+    check_remote(session, &root.remote, relative, false).await?;
+    if existing != bytes {
+        return Err(conflict());
+    }
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn transfer_file(
+    registry: &SftpRegistry,
+    session_id: &str,
+    root: &Root,
+    direction: TransferDirection,
+    local_relative: &str,
+    remote_relative: &str,
+    revoked: watch::Receiver<bool>,
+    cancel: watch::Receiver<bool>,
+    skip_identical: bool,
+) -> Result<Value, ServiceError> {
     still_allowed(&revoked, &cancel)?;
     let local = root.local.as_ref().ok_or_else(ServiceError::denied)?;
     let components = relative_components(remote_relative, false)?;
@@ -466,10 +661,39 @@ pub(super) async fn transfer(
         .map_err(|_| ServiceError::unavailable())?;
     match direction {
         TransferDirection::Upload => {
+            if skip_identical
+                && registry
+                    .windows_server(session_id)
+                    .map_err(|_| ServiceError::unavailable())?
+                && components
+                    .iter()
+                    .any(|component| !valid_local_name(component))
+            {
+                return Err(path_error());
+            }
             let bytes = read_local(local, local_relative)?;
             let (name, parents) = components.split_last().ok_or_else(path_error)?;
             let parent_relative = parents.join("/");
             let parent = check_remote(&session, &root.remote, &parent_relative, true).await?;
+            if skip_identical && parent.trim() != parent {
+                return Err(path_error());
+            }
+            still_allowed(&revoked, &cancel)?;
+            if skip_identical
+                && check_existing_upload(
+                    &session,
+                    root,
+                    remote_relative,
+                    &join_remote(&parent, &[*name]),
+                    &bytes,
+                )
+                .await?
+            {
+                still_allowed(&revoked, &cancel)?;
+                return Ok(
+                    json!({ "count": bytes.len(), "sha256": sha256(&bytes), "alreadyPresent": true }),
+                );
+            }
             still_allowed(&revoked, &cancel)?;
             let transfers = Arc::new(crate::sftp_transfers::TransferRegistry::new());
             let state = crate::sftp_transfers::begin_upload(
@@ -485,7 +709,13 @@ pub(super) async fn transfer(
                 },
             )
             .await
-            .map_err(|_| conflict())?;
+            .map_err(|_| {
+                if skip_identical {
+                    ServiceError::failed()
+                } else {
+                    conflict()
+                }
+            })?;
             let mut cleanup = UploadCleanup {
                 transfers,
                 id: state.transfer_id,
@@ -560,6 +790,84 @@ pub(super) async fn transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upload_batch_preflight_rejects_bad_paths_and_unbounded_or_duplicate_entries() {
+        let file = BatchUploadFile {
+            local_path: "input.bin".into(),
+            remote_path: "nested/output.bin".into(),
+        };
+        assert!(preflight_upload_batch(std::slice::from_ref(&file)).is_ok());
+        assert!(preflight_upload_batch(&[]).is_err());
+        assert!(preflight_upload_batch(&vec![file.clone(); MAX_BATCH_UPLOAD_FILES + 1]).is_err());
+        assert!(preflight_upload_batch(&[file.clone(), file.clone()]).is_err());
+        for remote_path in [
+            "../escape",
+            "nested/output.bin ",
+            "nested /output.bin",
+            "/outside",
+        ] {
+            assert!(preflight_upload_batch(&[BatchUploadFile {
+                remote_path: remote_path.into(),
+                ..file.clone()
+            }])
+            .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_batch_requires_both_scopes_and_honors_cancellation_and_revocation() {
+        use super::super::{DesktopOperation, Reservation, Scopes};
+        let files = vec![BatchUploadFile {
+            local_path: "source".into(),
+            remote_path: "destination".into(),
+        }];
+        let operation = DesktopOperation::UploadBatch {
+            target_id: "target".into(),
+            root_id: "root".into(),
+            files: files.clone(),
+            request_id: "batch".into(),
+        };
+        assert!(!operation.scopes_allow(&Scopes {
+            upload: true,
+            ..Default::default()
+        }));
+        assert!(!operation.scopes_allow(&Scopes {
+            download: true,
+            ..Default::default()
+        }));
+        assert!(operation.scopes_allow(&Scopes {
+            upload: true,
+            download: true,
+            ..Default::default()
+        }));
+        let service = super::super::tests::service();
+        let Reservation::New(lease) = service
+            .reserve("client", "batch", "target", &operation)
+            .unwrap()
+        else {
+            panic!("expected a new batch");
+        };
+        let root = Root {
+            id: "root".into(),
+            remote: "/remote".into(),
+            local: None,
+        };
+        let registry = SftpRegistry::new();
+        let (revoke, revoked) = watch::channel(false);
+        lease.cancel.send_replace(true);
+        let result = upload_batch(&registry, "offline", &root, &files, revoked.clone(), &lease)
+            .await
+            .unwrap();
+        assert_eq!(result["stopReason"], "cancelled");
+        assert_eq!(result["unattempted"], 1);
+        assert_eq!(result["results"], json!([]));
+        revoke.send_replace(true);
+        let error = upload_batch(&registry, "offline", &root, &files, revoked, &lease)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "not_authorized");
+    }
 
     #[test]
     fn relative_paths_reject_traversal_drives_unc_control_and_empty_segments() {
