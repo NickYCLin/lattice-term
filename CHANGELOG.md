@@ -4,6 +4,18 @@
 
 ---
 
+## [2026.11.28](https://github.com/NickYCLin/lattice-term/compare/v2026.11.27...v2026.11.28) (2026-11-27)
+
+
+### 🚀 新增功能
+
+* **mcp:** 加入可續跑的 SFTP 批次上傳 ([b0788bd](https://github.com/NickYCLin/lattice-term/commit/b0788bdce51a4651318354ffc400cdb37b536a2e))
+
+
+### 🛠️ 問題修正
+
+* **chat:** ????????????? ([b86a759](https://github.com/NickYCLin/lattice-term/commit/b86a7596277fdc347cd9c4881ab3d128be2a210d))
+
 ## [2026.11.27](https://github.com/NickYCLin/lattice-term/compare/v2026.11.26...v2026.11.27) (2026-11-26)
 
 
